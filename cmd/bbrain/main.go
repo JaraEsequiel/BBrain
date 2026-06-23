@@ -41,7 +41,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func runWithIn(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates|wiki|setup|watch|mcp> [args]")
+		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates|wiki|setup|watch|vault|mcp> [args]")
 		return 2
 	}
 	switch args[0] {
@@ -83,6 +83,8 @@ func runWithIn(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdSetup(args[1:], stdout, stderr)
 	case "watch":
 		return cmdWatch(args[1:], stdout, stderr)
+	case "vault":
+		return cmdVault(args[1:], stdout, stderr)
 	case "mcp":
 		return cmdMCP(args[1:], stdin, stdout, stderr)
 	default:
@@ -437,4 +439,34 @@ func cmdWatch(args []string, stdout, stderr io.Writer) int {
 		}
 		time.Sleep(time.Duration(*interval) * time.Second)
 	}
+}
+
+func cmdVault(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || args[0] != "move" {
+		fmt.Fprintln(stderr, "vault: usage: bbrain vault move [--project DIR] <dest>")
+		return 2
+	}
+	fs := flag.NewFlagSet("vault move", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	project := fs.String("project", "", "also refresh this project's .mcp.json + CLAUDE.md at the new home")
+	if err := fs.Parse(args[1:]); err != nil {
+		return 2
+	}
+	rest := fs.Args()
+	if len(rest) != 1 {
+		fmt.Fprintln(stderr, "vault move: exactly one destination is required (flags before <dest>)")
+		return 2
+	}
+	a := app.New(brainRoot())
+	newRoot, n, err := a.VaultMove(rest[0], app.VaultMoveOptions{ProjectDir: *project})
+	if err != nil {
+		fmt.Fprintf(stderr, "vault move: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "moved brain to %s (reindexed %d facts)\n", newRoot, n)
+	fmt.Fprintf(stdout, "next: export BBRAIN_HOME=%s\n", newRoot)
+	if *project != "" {
+		fmt.Fprintf(stdout, "refreshed integration in %s\n", *project)
+	}
+	return 0
 }

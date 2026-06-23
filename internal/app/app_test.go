@@ -417,3 +417,68 @@ func TestSetupClaudeCodeWritesAndIsIdempotent(t *testing.T) {
 		t.Fatalf("duplicate managed block after re-run:\n%s", cm2)
 	}
 }
+
+func TestVaultMoveRelocatesAndReindexes(t *testing.T) {
+	src := t.TempDir()
+	a := New(src)
+	must(t, a.Init())
+	f, err := a.Save(store.SaveInput{Type: "decision", Title: "Movable JWT", Body: "tokens", Project: "p", Scope: "project"})
+	must(t, err)
+	dest := filepath.Join(t.TempDir(), "moved")
+
+	newRoot, n, err := a.VaultMove(dest, VaultMoveOptions{})
+	must(t, err)
+	if newRoot != dest || n < 1 {
+		t.Fatalf("VaultMove = %q, %d", newRoot, n)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatal("source brain still present after move")
+	}
+	// Facts survive at dest and the index was rebuilt there.
+	nb := New(dest)
+	got, ok, err := nb.Get(f.ID)
+	must(t, err)
+	if !ok || got.Title != "Movable JWT" {
+		t.Fatalf("fact missing at dest: %+v ok=%v", got, ok)
+	}
+	res, err := nb.Search("jwt", 10)
+	must(t, err)
+	if len(res) == 0 {
+		t.Fatal("search returns nothing after move (index not rebuilt)")
+	}
+}
+
+func TestVaultMoveRefreshesProject(t *testing.T) {
+	src := t.TempDir()
+	a := New(src)
+	must(t, a.Init())
+	proj := t.TempDir()
+	dest := filepath.Join(t.TempDir(), "moved")
+
+	_, _, err := a.VaultMove(dest, VaultMoveOptions{ProjectDir: proj})
+	must(t, err)
+	mcp, err := os.ReadFile(filepath.Join(proj, ".mcp.json"))
+	must(t, err)
+	if !strings.Contains(string(mcp), dest) {
+		t.Fatalf(".mcp.json not pointed at new home %q:\n%s", dest, mcp)
+	}
+}
+
+func TestVaultMoveRegeneratesEnvSh(t *testing.T) {
+	src := t.TempDir()
+	a := New(src)
+	must(t, a.Init())
+	// simulate a prior `setup` by placing an adapter under the brain.
+	adapterDir := filepath.Join(src, ".bbrain", "agents")
+	must(t, os.MkdirAll(adapterDir, 0o755))
+	must(t, os.WriteFile(filepath.Join(adapterDir, "claude-code.sh"), []byte("#!/bin/sh\n"), 0o755))
+	dest := filepath.Join(t.TempDir(), "moved")
+
+	newRoot, _, err := a.VaultMove(dest, VaultMoveOptions{})
+	must(t, err)
+	env, err := os.ReadFile(filepath.Join(newRoot, ".bbrain", "env.sh"))
+	must(t, err)
+	if !strings.Contains(string(env), newRoot) {
+		t.Fatalf("env.sh not regenerated to the new home %q:\n%s", newRoot, env)
+	}
+}

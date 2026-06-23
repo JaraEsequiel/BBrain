@@ -59,3 +59,15 @@ Date: 2026-06-23 (Plan 4 merged as PR #4).
 - Path-traversal guard verified live: `mem_delete {"id":"../../../victim"}` → `isError:true` ("invalid fact id"), target file untouched.
 
 The MCP tool names exposed to Claude Code are `mcp__bbrain__<tool>` (e.g. `mcp__bbrain__mem_search`). Plan 5 (`bbrain setup`) will productionize installation (PATH + a real brain + the agent adapter from Finding #1).
+
+---
+
+## Plan 5 setup/install — live Claude Code validation (PASS)
+
+Date: 2026-06-23 (Plan 5 merged as PR #5).
+
+- `bbrain setup claude-code --dir <proj> --home <brain>` generated all 4 artifacts: the agent adapter (`<brain>/.bbrain/agents/claude-code.sh`), a valid `.mcp.json` (stdio `bbrain mcp` + `BBRAIN_HOME`), a managed CLAUDE.md block (`mcp__bbrain__*` tools), and a sourceable `env.sh`.
+- **The GENERATED adapter drives Claude Code end-to-end:** sourced `env.sh` (→ `BBRAIN_AGENT_CLI`), ran `bbrain wiki build`; live Claude distilled 2 facts into "ShopApp Datastore Decisions" (both sources + `[[fact-id]]` citations), exit 0.
+- Security (verified with `sh -n` + safe `source`): malicious `--model` → no injection (falls back to default); a brain path containing a single quote → `env.sh` sources safely; an orphaned-marker CLAUDE.md → repaired to one block with user content preserved.
+
+Install flow for users: `bbrain setup claude-code` in a project, then `source <brain>/.bbrain/env.sh` for the wiki backend; Claude Code reads `.mcp.json` for the MCP tools.

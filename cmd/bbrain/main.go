@@ -30,7 +30,7 @@ func brainRoot() string {
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex> [args]")
+		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates> [args]")
 		return 2
 	}
 	switch args[0] {
@@ -58,6 +58,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdSave(args[1:], stdout, stderr)
 	case "search":
 		return cmdSearch(args[1:], stdout, stderr)
+	case "link":
+		return cmdLink(args[1:], stdout, stderr)
+	case "why":
+		return cmdWhy(args[1:], stdout, stderr)
+	case "related":
+		return cmdRelated(args[1:], stdout, stderr)
+	case "candidates":
+		return cmdCandidates(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 2
@@ -115,6 +123,95 @@ func cmdSearch(args []string, stdout, stderr io.Writer) int {
 	res, err := a.Search(query, *limit)
 	if err != nil {
 		fmt.Fprintf(stderr, "search: %v\n", err)
+		return 1
+	}
+	for _, r := range res {
+		fmt.Fprintf(stdout, "%s\t%s\t%s\n", r.FactID, r.Type, r.Title)
+	}
+	return 0
+}
+
+func cmdLink(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("link", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	from := fs.String("from", "", "source fact id (required)")
+	to := fs.String("to", "", "target fact id (required)")
+	rel := fs.String("relation", "relates", "relation type (relates|depends-on|conflicts-with|supersedes|scoped|compatible)")
+	why := fs.String("why", "", "why the two facts are related (required)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *from == "" || *to == "" || *why == "" {
+		fmt.Fprintln(stderr, "link: --from, --to and --why are required")
+		return 2
+	}
+	a := app.New(brainRoot())
+	f, err := a.Link(*from, *to, *rel, *why)
+	if err != nil {
+		fmt.Fprintf(stderr, "link: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "linked %s -[%s]-> %s\n", f.ID, *rel, *to)
+	return 0
+}
+
+func cmdWhy(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 2 {
+		fmt.Fprintln(stderr, "why: usage: bbrain why <factA> <factB>")
+		return 2
+	}
+	a := app.New(brainRoot())
+	edges, err := a.Why(args[0], args[1])
+	if err != nil {
+		fmt.Fprintf(stderr, "why: %v\n", err)
+		return 1
+	}
+	if len(edges) == 0 {
+		fmt.Fprintf(stdout, "no direct link between %s and %s\n", args[0], args[1])
+		return 0
+	}
+	for _, e := range edges {
+		fmt.Fprintf(stdout, "%s -[%s]-> %s: %s\n", e.SrcID, e.Relation, e.DstID, e.Why)
+	}
+	return 0
+}
+
+func cmdRelated(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "related: usage: bbrain related <factID>")
+		return 2
+	}
+	a := app.New(brainRoot())
+	ns, err := a.Related(args[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "related: %v\n", err)
+		return 1
+	}
+	for _, n := range ns {
+		arrow := "->"
+		if n.Direction == "in" {
+			arrow = "<-"
+		}
+		fmt.Fprintf(stdout, "%s %s [%s] %s\n", arrow, n.FactID, n.Relation, n.Why)
+	}
+	return 0
+}
+
+func cmdCandidates(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("candidates", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	limit := fs.Int("limit", 10, "max candidates")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "candidates: usage: bbrain candidates [--limit N] <factID>")
+		return 2
+	}
+	a := app.New(brainRoot())
+	res, err := a.Candidates(fs.Arg(0), *limit)
+	if err != nil {
+		fmt.Fprintf(stderr, "candidates: %v\n", err)
 		return 1
 	}
 	for _, r := range res {

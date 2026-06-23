@@ -298,6 +298,63 @@ func TestEndToEndWikiLintFix(t *testing.T) {
 	}
 }
 
+func TestEndToEndSetupClaudeCode(t *testing.T) {
+	home := t.TempDir()
+	proj := t.TempDir()
+	t.Setenv("BBRAIN_HOME", home)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"init"}, &out, &errOut); code != 0 {
+		t.Fatalf("init: %s", errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"setup", "claude-code", "--dir", proj, "--home", home}, &out, &errOut); code != 0 {
+		t.Fatalf("setup: %s", errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(proj, ".mcp.json")); err != nil {
+		t.Fatalf(".mcp.json not written: %v", err)
+	}
+	cm, _ := os.ReadFile(filepath.Join(proj, "CLAUDE.md"))
+	if !strings.Contains(string(cm), "mcp__bbrain__mem_save") {
+		t.Fatalf("CLAUDE.md = %s", cm)
+	}
+}
+
+func TestSetupDryRunWritesNothing(t *testing.T) {
+	home := t.TempDir()
+	proj := t.TempDir()
+	t.Setenv("BBRAIN_HOME", home)
+	var out, errOut bytes.Buffer
+	run([]string{"init"}, &out, &errOut)
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"setup", "claude-code", "--dir", proj, "--home", home, "--dry-run"}, &out, &errOut); code != 0 {
+		t.Fatalf("setup --dry-run: %s", errOut.String())
+	}
+	if !strings.Contains(out.String(), "[dry-run]") {
+		t.Fatalf("dry-run banner missing: %s", out.String())
+	}
+	if entries, _ := os.ReadDir(proj); len(entries) != 0 {
+		t.Fatalf("dry-run wrote files: %v", entries)
+	}
+}
+
+func TestEndToEndWatchOnce(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("BBRAIN_HOME", home)
+	var out, errOut bytes.Buffer
+	run([]string{"init"}, &out, &errOut)
+	run([]string{"save", "--title", "Watched fact", "--project", "p", "--type", "decision", "--body", "b"}, &out, &errOut)
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"watch", "--once"}, &out, &errOut); code != 0 {
+		t.Fatalf("watch --once: %s", errOut.String())
+	}
+	if !strings.Contains(out.String(), "reindexed") {
+		t.Fatalf("watch output = %q", out.String())
+	}
+}
+
 func runStdin(t *testing.T, args []string, stdin string, out, errOut *bytes.Buffer) int {
 	t.Helper()
 	return runWithIn(args, strings.NewReader(stdin), out, errOut)

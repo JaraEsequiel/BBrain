@@ -14,6 +14,7 @@ import (
 	"bbrain/internal/fact"
 	"bbrain/internal/index"
 	"bbrain/internal/llm"
+	"bbrain/internal/setup"
 	"bbrain/internal/store"
 	"bbrain/internal/wiki"
 )
@@ -475,4 +476,66 @@ func (a *App) Delete(id string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// SetupOptions configures App.SetupClaudeCode.
+type SetupOptions struct {
+	ProjectDir string // where .mcp.json + CLAUDE.md go (default: cwd, set by caller)
+	BrainHome  string // brain root for the adapter/env (default: a.Brain.Root)
+	Model      string // claude model for the adapter (default: claude-sonnet-4-6)
+	DryRun     bool
+}
+
+// SetupAction is one file the setup writes (or would write, on dry-run).
+type SetupAction struct {
+	Path    string
+	Summary string
+	Content string
+	Mode    os.FileMode
+}
+
+// SetupClaudeCode computes (and unless DryRun, writes) the four integration
+// artifacts: the agent adapter, a merged .mcp.json, a managed CLAUDE.md block, and
+// a sourceable env.sh. It is idempotent.
+func (a *App) SetupClaudeCode(opts SetupOptions) ([]SetupAction, error) {
+	if opts.Model == "" {
+		opts.Model = "claude-sonnet-4-6"
+	}
+	if opts.BrainHome == "" {
+		opts.BrainHome = a.Brain.Root
+	}
+	adapterPath := filepath.Join(opts.BrainHome, ".bbrain", "agents", "claude-code.sh")
+
+	actions := []SetupAction{
+		{Path: adapterPath, Summary: "agent adapter (point BBRAIN_AGENT_CLI here)", Content: setup.AdapterScript(opts.Model), Mode: 0o755},
+	}
+
+	mcpPath := filepath.Join(opts.ProjectDir, ".mcp.json")
+	existing, _ := os.ReadFile(mcpPath) // absent -> nil, merged into a fresh config
+	merged, err := setup.MergeMCPConfig(existing, opts.BrainHome)
+	if err != nil {
+		return nil, fmt.Errorf("setup: .mcp.json: %w", err)
+	}
+	actions = append(actions, SetupAction{Path: mcpPath, Summary: "register bbrain MCP server", Content: string(merged) + "\n", Mode: 0o644})
+
+	cmPath := filepath.Join(opts.ProjectDir, "CLAUDE.md")
+	doc, _ := os.ReadFile(cmPath)
+	updated := setup.UpsertManagedBlock(string(doc), setup.ClaudeMDBlock(opts.BrainHome, adapterPath))
+	actions = append(actions, SetupAction{Path: cmPath, Summary: "managed CLAUDE.md block", Content: updated, Mode: 0o644})
+
+	envPath := filepath.Join(opts.BrainHome, ".bbrain", "env.sh")
+	actions = append(actions, SetupAction{Path: envPath, Summary: "BBRAIN_AGENT_CLI export (source this)", Content: setup.EnvExportLine(adapterPath) + "\n", Mode: 0o644})
+
+	if opts.DryRun {
+		return actions, nil
+	}
+	for _, act := range actions {
+		if err := os.MkdirAll(filepath.Dir(act.Path), 0o755); err != nil {
+			return nil, fmt.Errorf("setup: mkdir %s: %w", filepath.Dir(act.Path), err)
+		}
+		if err := os.WriteFile(act.Path, []byte(act.Content), act.Mode); err != nil {
+			return nil, fmt.Errorf("setup: write %s: %w", act.Path, err)
+		}
+	}
+	return actions, nil
 }

@@ -4,6 +4,7 @@
 package wiki
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,11 +14,13 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/natefinch/atomic"
 	"gopkg.in/yaml.v3"
 
 	"bbrain/internal/fact"
+	"bbrain/internal/llm"
 )
 
 // Page is one wiki page produced by the LLM.
@@ -239,4 +242,126 @@ func AppendLog(wikiDir, entry string) error {
 	defer f.Close()
 	_, err = f.WriteString(entry)
 	return err
+}
+
+// BuildOptions configures one wiki build.
+type BuildOptions struct {
+	WikiDir    string
+	Facts      []fact.Fact   // already filtered by project/scope
+	Categories []string      // active category vocabulary
+	Runner     llm.Runner
+	Now        func() time.Time
+	DryRun     bool
+}
+
+// BuildResult reports what a build wrote.
+type BuildResult struct {
+	Written  []string // slash relpaths
+	LogEntry string
+	DryRun   bool
+}
+
+// BuildPrompt assembles the LLM prompt: instructions, the category vocabulary,
+// the expected JSON schema, the facts digest, and the existing pages (so the LLM
+// can reconcile manual edits with new facts).
+func BuildPrompt(facts []fact.Fact, existing []pageOnDisk, categories []string) string {
+	var sb strings.Builder
+	sb.WriteString("You are BBrain's wiki distiller. Read the raw facts below and produce distilled wiki pages.\n")
+	sb.WriteString("Return ONLY a single JSON object: {\"pages\":[{\"slug\",\"category\",\"title\",\"sources\",\"body\",\"change_reason\"}]}.\n")
+	sb.WriteString("- slug: kebab-case [a-z0-9-].\n")
+	sb.WriteString("- category: one of: " + strings.Join(categories, ", ") + ".\n")
+	sb.WriteString("- sources: fact ids this page distills (must be ids from the facts below).\n")
+	sb.WriteString("- body: distilled markdown; cite facts as [[fact-id]].\n")
+	sb.WriteString("- change_reason: short note of what changed and why.\n")
+	sb.WriteString("If an existing page below should change, return it again with a reconciled body.\n\n")
+
+	sb.WriteString("## Facts\n")
+	for _, f := range facts {
+		sb.WriteString("### " + f.ID + "\n")
+		sb.WriteString(fmt.Sprintf("title: %s | type: %s | project: %s | scope: %s | tags: %s\n",
+			f.Title, f.Type, f.Project, f.Scope, strings.Join(f.Tags, ",")))
+		sb.WriteString(strings.TrimSpace(f.Body) + "\n\n")
+	}
+
+	sb.WriteString("## Existing wiki pages\n")
+	if len(existing) == 0 {
+		sb.WriteString("(none)\n")
+	}
+	for _, p := range existing {
+		sb.WriteString("### " + p.RelPath + "\n")
+		sb.WriteString(p.Content + "\n\n")
+	}
+	return sb.String()
+}
+
+// Build runs one wiki build: prompt the LLM, validate every page, then write
+// pages, regenerate the index, and append the log. On any validation error
+// nothing is written.
+func Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
+	byID := map[string]fact.Fact{}
+	for _, f := range opts.Facts {
+		byID[f.ID] = f
+	}
+	existing, err := readPages(opts.WikiDir)
+	if err != nil {
+		return BuildResult{}, err
+	}
+	stdout, err := opts.Runner.Run(ctx, BuildPrompt(opts.Facts, existing, opts.Categories))
+	if err != nil {
+		return BuildResult{}, err
+	}
+	pages, err := ParseResponse(stdout)
+	if err != nil {
+		return BuildResult{}, err
+	}
+	valid := map[string]bool{}
+	for _, c := range opts.Categories {
+		valid[c] = true
+	}
+	for _, p := range pages {
+		if err := ValidatePage(p, valid, byID); err != nil {
+			return BuildResult{}, err
+		}
+	}
+
+	now := opts.Now().UTC().Format(time.RFC3339)
+	var written []string
+	var logb strings.Builder
+	logb.WriteString("\n## " + now + " — wiki build\n")
+	for _, p := range pages {
+		bucket := DeriveBucket(p.Sources, byID)
+		rel := path.Join(bucket, p.Category, p.Slug+".md")
+		written = append(written, rel)
+		reason := strings.TrimSpace(p.ChangeReason)
+		if reason == "" {
+			reason = "updated"
+		}
+		noun := "sources"
+		if len(p.Sources) == 1 {
+			noun = "source"
+		}
+		logb.WriteString(fmt.Sprintf("- wrote %s (%d %s): %s\n", rel, len(p.Sources), noun, reason))
+	}
+	res := BuildResult{Written: written, LogEntry: logb.String(), DryRun: opts.DryRun}
+	if opts.DryRun {
+		return res, nil
+	}
+
+	for _, p := range pages {
+		bucket := DeriveBucket(p.Sources, byID)
+		dst := PagePath(opts.WikiDir, bucket, p.Category, p.Slug)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return BuildResult{}, err
+		}
+		if err := atomic.WriteFile(dst, strings.NewReader(RenderPage(p, now))); err != nil {
+			return BuildResult{}, err
+		}
+	}
+	if err := RegenerateIndex(opts.WikiDir); err != nil {
+		return BuildResult{}, err
+	}
+	if err := AppendLog(opts.WikiDir, res.LogEntry); err != nil {
+		return BuildResult{}, err
+	}
+	return res, nil
 }

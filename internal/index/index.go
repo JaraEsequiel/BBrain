@@ -52,16 +52,24 @@ func (ix *Index) Close() error { return ix.db.Close() }
 // IndexFact upserts a fact: it removes any existing row with the same fact_id
 // then inserts the current content.
 func (ix *Index) IndexFact(f fact.Fact, path string) error {
-	if _, err := ix.db.Exec(`DELETE FROM facts_fts WHERE fact_id = ?`, f.ID); err != nil {
+	tx, err := ix.db.Begin()
+	if err != nil {
 		return err
 	}
-	_, err := ix.db.Exec(
+	if _, err := tx.Exec(`DELETE FROM facts_fts WHERE fact_id = ?`, f.ID); err != nil {
+		tx.Rollback()
+		return err
+	}
+	if _, err := tx.Exec(
 		`INSERT INTO facts_fts (fact_id, path, title, body, tags, topic_key, type, scope, project)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		f.ID, path, f.Title, f.Body, strings.Join(f.Tags, " "), f.TopicKey,
 		f.Type, f.Scope, f.Project,
-	)
-	return err
+	); err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit()
 }
 
 // Clear empties the index (used before a full reindex).

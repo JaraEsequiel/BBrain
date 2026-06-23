@@ -226,12 +226,14 @@ func cmdCandidates(args []string, stdout, stderr io.Writer) int {
 
 func cmdWiki(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "wiki: usage: bbrain wiki <build> [args]")
+		fmt.Fprintln(stderr, "wiki: usage: bbrain wiki <build|link|lint> [args]")
 		return 2
 	}
 	switch args[0] {
 	case "build":
 		return cmdWikiBuild(args[1:], stdout, stderr)
+	case "link":
+		return cmdWikiLink(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "wiki: unknown subcommand %q\n", args[0])
 		return 2
@@ -269,6 +271,36 @@ func cmdWikiBuild(args []string, stdout, stderr io.Writer) int {
 	}
 	for _, w := range res.Written {
 		fmt.Fprintln(stdout, w)
+	}
+	return 0
+}
+
+func cmdWikiLink(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("wiki link", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	project := fs.String("project", "", "only link facts in this project")
+	scope := fs.String("scope", "", "only link facts in this scope")
+	limit := fs.Int("limit", 8, "max FTS candidates considered per fact")
+	dryRun := fs.Bool("dry-run", false, "print proposed links without writing")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	a := app.New(brainRoot())
+	res, err := a.WikiLink(context.Background(), app.WikiLinkOptions{
+		Project: *project, Scope: *scope, Limit: *limit, DryRun: *dryRun,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "wiki link: %v\n", err)
+		return 1
+	}
+	if res.DryRun {
+		fmt.Fprintln(stdout, "[dry-run] would write:")
+	}
+	for _, e := range res.Written {
+		fmt.Fprintf(stdout, "%s -[%s]-> %s: %s\n", e.Src, e.Relation, e.Dst, e.Why)
+	}
+	if res.Skipped > 0 {
+		fmt.Fprintf(stdout, "(skipped %d already-linked)\n", res.Skipped)
 	}
 	return 0
 }

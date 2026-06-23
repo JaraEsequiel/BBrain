@@ -161,6 +161,26 @@ func TestSearchAnyMatchesAnyTerm(t *testing.T) {
 	}
 }
 
+func TestBuildMatchHelpers(t *testing.T) {
+	cases := []struct {
+		name, in, and, or string
+	}{
+		{"two terms", "jwt database", `"jwt" "database"`, `"jwt" OR "database"`},
+		{"single term", "postgres", `"postgres"`, `"postgres"`},
+		{"embedded quote", `a"b`, `"a""b"`, `"a""b"`},
+		{"collapses whitespace", "  jwt   auth  ", `"jwt" "auth"`, `"jwt" OR "auth"`},
+		{"blank query", "   ", "", ""},
+	}
+	for _, c := range cases {
+		if got := buildMatch(c.in); got != c.and {
+			t.Errorf("%s: buildMatch(%q) = %q, want %q", c.name, c.in, got, c.and)
+		}
+		if got := buildMatchAny(c.in); got != c.or {
+			t.Errorf("%s: buildMatchAny(%q) = %q, want %q", c.name, c.in, got, c.or)
+		}
+	}
+}
+
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

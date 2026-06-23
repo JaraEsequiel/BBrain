@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"bbrain/internal/app"
 	"bbrain/internal/mcp"
 	"bbrain/internal/store"
+	"bbrain/internal/watch"
 )
 
 const version = "0.1.0-dev"
@@ -38,7 +41,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func runWithIn(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates|wiki|mcp> [args]")
+		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates|wiki|setup|watch|mcp> [args]")
 		return 2
 	}
 	switch args[0] {
@@ -76,6 +79,10 @@ func runWithIn(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdCandidates(args[1:], stdout, stderr)
 	case "wiki":
 		return cmdWiki(args[1:], stdout, stderr)
+	case "setup":
+		return cmdSetup(args[1:], stdout, stderr)
+	case "watch":
+		return cmdWatch(args[1:], stdout, stderr)
 	case "mcp":
 		return cmdMCP(args[1:], stdin, stdout, stderr)
 	default:
@@ -357,4 +364,77 @@ func cmdMCP(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func cmdSetup(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || args[0] != "claude-code" {
+		fmt.Fprintln(stderr, "setup: usage: bbrain setup claude-code [--dir D] [--home H] [--model M] [--dry-run]")
+		return 2
+	}
+	fs := flag.NewFlagSet("setup claude-code", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "project dir for .mcp.json + CLAUDE.md")
+	home := fs.String("home", "", "brain home (default: resolved brain root)")
+	model := fs.String("model", "claude-sonnet-4-6", "claude model for the adapter")
+	dry := fs.Bool("dry-run", false, "print actions without writing")
+	if err := fs.Parse(args[1:]); err != nil {
+		return 2
+	}
+	bh := *home
+	if bh == "" {
+		bh = brainRoot()
+	}
+	a := app.New(brainRoot())
+	actions, err := a.SetupClaudeCode(app.SetupOptions{ProjectDir: *dir, BrainHome: bh, Model: *model, DryRun: *dry})
+	if err != nil {
+		fmt.Fprintf(stderr, "setup: %v\n", err)
+		return 1
+	}
+	if *dry {
+		fmt.Fprintln(stdout, "[dry-run] would write:")
+	}
+	for _, act := range actions {
+		fmt.Fprintf(stdout, "%s — %s\n", act.Path, act.Summary)
+		if *dry {
+			fmt.Fprintln(stdout, act.Content)
+		}
+	}
+	if !*dry {
+		fmt.Fprintf(stdout, "\nDone. In this project Claude Code reads .mcp.json automatically; set the wiki backend with: source %s\n",
+			filepath.Join(bh, ".bbrain", "env.sh"))
+	}
+	return 0
+}
+
+func cmdWatch(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	interval := fs.Int("interval", 2, "poll interval in seconds")
+	once := fs.Bool("once", false, "check once and exit (no loop)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	a := app.New(brainRoot())
+	factsDir := a.Brain.FactsDir()
+	last := ""
+	for {
+		fp, err := watch.FactsFingerprint(factsDir)
+		if err != nil {
+			fmt.Fprintf(stderr, "watch: %v\n", err)
+			return 1
+		}
+		if fp != last {
+			n, err := a.Reindex()
+			if err != nil {
+				fmt.Fprintf(stderr, "watch: %v\n", err)
+				return 1
+			}
+			fmt.Fprintf(stdout, "reindexed %d facts\n", n)
+			last = fp
+		}
+		if *once {
+			return 0
+		}
+		time.Sleep(time.Duration(*interval) * time.Second)
+	}
 }

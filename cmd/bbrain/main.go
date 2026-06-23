@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"bbrain/internal/app"
 	"bbrain/internal/store"
@@ -30,7 +32,7 @@ func brainRoot() string {
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates> [args]")
+		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates|wiki> [args]")
 		return 2
 	}
 	switch args[0] {
@@ -66,6 +68,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdRelated(args[1:], stdout, stderr)
 	case "candidates":
 		return cmdCandidates(args[1:], stdout, stderr)
+	case "wiki":
+		return cmdWiki(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 2
@@ -216,6 +220,55 @@ func cmdCandidates(args []string, stdout, stderr io.Writer) int {
 	}
 	for _, r := range res {
 		fmt.Fprintf(stdout, "%s\t%s\t%s\n", r.FactID, r.Type, r.Title)
+	}
+	return 0
+}
+
+func cmdWiki(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "wiki: usage: bbrain wiki <build> [args]")
+		return 2
+	}
+	switch args[0] {
+	case "build":
+		return cmdWikiBuild(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "wiki: unknown subcommand %q\n", args[0])
+		return 2
+	}
+}
+
+func cmdWikiBuild(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("wiki build", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	project := fs.String("project", "", "only distill facts in this project")
+	scope := fs.String("scope", "", "only distill facts in this scope")
+	cats := fs.String("categories", "", "extra wiki categories (comma-separated)")
+	dryRun := fs.Bool("dry-run", false, "print what would be written without writing")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	var extra []string
+	if *cats != "" {
+		for _, c := range strings.Split(*cats, ",") {
+			if c = strings.TrimSpace(c); c != "" {
+				extra = append(extra, c)
+			}
+		}
+	}
+	a := app.New(brainRoot())
+	res, err := a.WikiBuild(context.Background(), app.WikiBuildOptions{
+		Project: *project, Scope: *scope, Categories: extra, DryRun: *dryRun,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "wiki build: %v\n", err)
+		return 1
+	}
+	if res.DryRun {
+		fmt.Fprintln(stdout, "[dry-run] would write:")
+	}
+	for _, w := range res.Written {
+		fmt.Fprintln(stdout, w)
 	}
 	return 0
 }

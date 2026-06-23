@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"bbrain/internal/app"
+	"bbrain/internal/mcp"
 	"bbrain/internal/store"
 )
 
@@ -30,9 +31,14 @@ func brainRoot() string {
 	return home + "/.bbrain/default"
 }
 
+// run is the CLI entrypoint used by main(); it reads from os.Stdin.
 func run(args []string, stdout, stderr io.Writer) int {
+	return runWithIn(args, os.Stdin, stdout, stderr)
+}
+
+func runWithIn(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates|wiki> [args]")
+		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates|wiki|mcp> [args]")
 		return 2
 	}
 	switch args[0] {
@@ -70,6 +76,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdCandidates(args[1:], stdout, stderr)
 	case "wiki":
 		return cmdWiki(args[1:], stdout, stderr)
+	case "mcp":
+		return cmdMCP(args[1:], stdin, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 2
@@ -336,6 +344,16 @@ func cmdWikiLint(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s: %s — %s\n", is.Kind, is.Location, is.Message)
 	}
 	if len(res.Issues) > 0 {
+		return 1
+	}
+	return 0
+}
+
+func cmdMCP(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	a := app.New(brainRoot())
+	srv := &mcp.Server{App: a, Tools: mcp.DefaultTools()}
+	if err := srv.Serve(context.Background(), stdin, stdout); err != nil {
+		fmt.Fprintf(stderr, "mcp: %v\n", err)
 		return 1
 	}
 	return 0

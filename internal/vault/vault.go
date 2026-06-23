@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Move relocates the tree at src to dest. It refuses when dest equals src or when
@@ -33,22 +34,37 @@ func Move(src, dest string) error {
 	if absSrc == absDest {
 		return fmt.Errorf("vault: destination equals source")
 	}
+	if within(absSrc, absDest) || within(absDest, absSrc) {
+		return fmt.Errorf("vault: destination %q overlaps the source %q", dest, src)
+	}
 	if nonEmptyDir(absDest) {
 		return fmt.Errorf("vault: destination %q already exists and is not empty", dest)
 	}
 	if err := os.MkdirAll(filepath.Dir(absDest), 0o755); err != nil {
 		return err
 	}
-	// Fast path: atomic rename within the same filesystem.
+	// Fast path: an atomic rename within one filesystem. Any rename error
+	// (cross-device EXDEV, etc.) falls through to the copy fallback below.
 	if err := os.Rename(absSrc, absDest); err == nil {
 		return nil
 	}
 	// Fallback: copy the tree, then remove the source only on success.
 	if err := copyTree(absSrc, absDest); err != nil {
-		os.RemoveAll(absDest) // don't leave a partial copy
+		if rmErr := os.RemoveAll(absDest); rmErr != nil {
+			return fmt.Errorf("vault: copy failed (%w); partial destination left at %s: %v", err, absDest, rmErr)
+		}
 		return err
 	}
 	return os.RemoveAll(absSrc)
+}
+
+// within reports whether child is the same as, or nested under, parent.
+func within(parent, child string) bool {
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
 // nonEmptyDir reports whether path is a directory containing at least one entry.

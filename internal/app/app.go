@@ -553,23 +553,26 @@ func (a *App) VaultMove(dest string, opts VaultMoveOptions) (string, int, error)
 	if err := vault.Move(a.Brain.Root, dest); err != nil {
 		return "", 0, err
 	}
-	nb := New(dest)
+	absDest, err := filepath.Abs(dest)
+	if err != nil {
+		absDest = dest
+	}
+	nb := New(absDest)
 	indexed, err := nb.Reindex()
 	if err != nil {
-		return "", 0, err
+		return "", 0, fmt.Errorf("brain moved to %s but reindex failed: %w", absDest, err)
 	}
-	// Point the brain's env.sh at the moved adapter, if setup was run before the move.
-	adapter := filepath.Join(dest, ".bbrain", "agents", "claude-code.sh")
+	adapter := filepath.Join(absDest, ".bbrain", "agents", "claude-code.sh")
 	if _, statErr := os.Stat(adapter); statErr == nil {
-		envPath := filepath.Join(dest, ".bbrain", "env.sh")
+		envPath := filepath.Join(absDest, ".bbrain", "env.sh")
 		if err := os.WriteFile(envPath, []byte(setup.EnvExportLine(adapter)+"\n"), 0o644); err != nil {
-			return "", 0, err
+			return "", 0, fmt.Errorf("brain moved to %s but env.sh refresh failed: %w", absDest, err)
 		}
 	}
 	if opts.ProjectDir != "" {
-		if _, err := nb.SetupClaudeCode(SetupOptions{ProjectDir: opts.ProjectDir, BrainHome: dest}); err != nil {
-			return "", 0, err
+		if _, err := nb.SetupClaudeCode(SetupOptions{ProjectDir: opts.ProjectDir, BrainHome: absDest}); err != nil {
+			return "", 0, fmt.Errorf("brain moved to %s but project refresh failed: %w", absDest, err)
 		}
 	}
-	return dest, indexed, nil
+	return absDest, indexed, nil
 }

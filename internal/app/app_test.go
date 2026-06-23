@@ -463,3 +463,22 @@ func TestVaultMoveRefreshesProject(t *testing.T) {
 		t.Fatalf(".mcp.json not pointed at new home %q:\n%s", dest, mcp)
 	}
 }
+
+func TestVaultMoveRegeneratesEnvSh(t *testing.T) {
+	src := t.TempDir()
+	a := New(src)
+	must(t, a.Init())
+	// simulate a prior `setup` by placing an adapter under the brain.
+	adapterDir := filepath.Join(src, ".bbrain", "agents")
+	must(t, os.MkdirAll(adapterDir, 0o755))
+	must(t, os.WriteFile(filepath.Join(adapterDir, "claude-code.sh"), []byte("#!/bin/sh\n"), 0o755))
+	dest := filepath.Join(t.TempDir(), "moved")
+
+	newRoot, _, err := a.VaultMove(dest, VaultMoveOptions{})
+	must(t, err)
+	env, err := os.ReadFile(filepath.Join(newRoot, ".bbrain", "env.sh"))
+	must(t, err)
+	if !strings.Contains(string(env), newRoot) {
+		t.Fatalf("env.sh not regenerated to the new home %q:\n%s", newRoot, env)
+	}
+}

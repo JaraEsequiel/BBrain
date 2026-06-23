@@ -83,7 +83,40 @@ func TestClaudeMDBlockMentionsToolsAndMarkers(t *testing.T) {
 }
 
 func TestEnvExportLine(t *testing.T) {
-	if got := EnvExportLine("/x/y.sh"); got != `export BBRAIN_AGENT_CLI="/x/y.sh"` {
+	if got := EnvExportLine("/x/y.sh"); got != `export BBRAIN_AGENT_CLI='/x/y.sh'` {
 		t.Fatalf("env line = %q", got)
+	}
+	// a single quote in the path is escaped, not break-out
+	if got := EnvExportLine("/a'b"); got != `export BBRAIN_AGENT_CLI='/a'\''b'` {
+		t.Fatalf("env line (quote) = %q", got)
+	}
+}
+
+func TestAdapterScriptRejectsUnsafeModel(t *testing.T) {
+	s := AdapterScript(`x"; rm -rf / #`)
+	if strings.Contains(s, "rm -rf") {
+		t.Fatalf("unsafe model interpolated into adapter:\n%s", s)
+	}
+	if !strings.Contains(s, "claude-sonnet-4-6") {
+		t.Fatalf("expected fallback model:\n%s", s)
+	}
+}
+
+func TestUpsertManagedBlockHalfOpenMarkers(t *testing.T) {
+	block := ClaudeMDBlock("/b", "/a.sh")
+	// only a BEGIN marker present (corrupt doc): result must have exactly one pair
+	for _, corrupt := range []string{
+		"# Doc\n" + BlockBegin + "\nstray\n",
+		"# Doc\n" + BlockEnd + "\nstray\n",
+		"# Doc\n" + BlockEnd + "\nmiddle\n" + BlockBegin + "\n",
+	} {
+		got := UpsertManagedBlock(corrupt, block)
+		if strings.Count(got, BlockBegin) != 1 || strings.Count(got, BlockEnd) != 1 {
+			t.Fatalf("half-open upsert left bad markers:\n%s", got)
+		}
+		// idempotent thereafter
+		if again := UpsertManagedBlock(got, block); again != got {
+			t.Fatalf("not idempotent after repair")
+		}
 	}
 }

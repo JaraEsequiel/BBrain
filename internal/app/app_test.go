@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"bbrain/internal/fact"
 	"bbrain/internal/index"
 	"bbrain/internal/store"
 )
@@ -216,5 +217,82 @@ func TestWikiBuildFiltersByProject(t *testing.T) {
 	}
 	if !strings.Contains(fr.gotPrompt, "title: Beta") {
 		t.Fatalf("project filter dropped the datacli fact:\n%s", fr.gotPrompt)
+	}
+}
+
+// linkRunner emits a link proposal only for the source fact's prompt.
+type linkRunner struct{ srcID, dstID string }
+
+func (r *linkRunner) Run(ctx context.Context, prompt string) (string, error) {
+	if strings.Contains(prompt, "## Source fact\n### "+r.srcID+"\n") {
+		return `{"links":[{"dst":"` + r.dstID + `","relation":"relates","why":"both about jwt"}]}`, nil
+	}
+	return `{"links":[]}`, nil
+}
+
+func TestWikiLinkWritesEdge(t *testing.T) {
+	a := New(t.TempDir())
+	must(t, a.Init())
+	src, err := a.Save(store.SaveInput{Type: "decision", Title: "JWT access tokens", Body: "access", Project: "shopapp", Scope: "project"})
+	must(t, err)
+	dst, err := a.Save(store.SaveInput{Type: "decision", Title: "JWT refresh tokens", Body: "refresh", Project: "shopapp", Scope: "project"})
+	must(t, err)
+	a.Runner = &linkRunner{srcID: src.ID, dstID: dst.ID}
+
+	res, err := a.WikiLink(context.Background(), WikiLinkOptions{})
+	must(t, err)
+	if len(res.Written) != 1 || res.Written[0].Src != src.ID || res.Written[0].Dst != dst.ID || res.Written[0].Relation != "relates" {
+		t.Fatalf("written = %+v", res.Written)
+	}
+	// The link must be on the source fact's .md.
+	got, ok, err := a.Store.Get(src.ID)
+	must(t, err)
+	if !ok || len(got.Links) != 1 || fact.LinkTargetID(got.Links[0].Target) != dst.ID {
+		t.Fatalf("source links = %+v", got.Links)
+	}
+}
+
+func TestWikiLinkDryRunWritesNothing(t *testing.T) {
+	a := New(t.TempDir())
+	must(t, a.Init())
+	src, err := a.Save(store.SaveInput{Type: "decision", Title: "JWT access tokens", Body: "access", Project: "shopapp", Scope: "project"})
+	must(t, err)
+	dst, err := a.Save(store.SaveInput{Type: "decision", Title: "JWT refresh tokens", Body: "refresh", Project: "shopapp", Scope: "project"})
+	must(t, err)
+	a.Runner = &linkRunner{srcID: src.ID, dstID: dst.ID}
+
+	res, err := a.WikiLink(context.Background(), WikiLinkOptions{DryRun: true})
+	must(t, err)
+	if !res.DryRun || len(res.Written) != 1 {
+		t.Fatalf("dry-run result = %+v", res)
+	}
+	got, _, _ := a.Store.Get(src.ID)
+	if len(got.Links) != 0 {
+		t.Fatalf("dry-run wrote a link: %+v", got.Links)
+	}
+}
+
+func TestWikiLinkIsIdempotent(t *testing.T) {
+	a := New(t.TempDir())
+	must(t, a.Init())
+	src, err := a.Save(store.SaveInput{Type: "decision", Title: "JWT access tokens", Body: "access", Project: "shopapp", Scope: "project"})
+	must(t, err)
+	dst, err := a.Save(store.SaveInput{Type: "decision", Title: "JWT refresh tokens", Body: "refresh", Project: "shopapp", Scope: "project"})
+	must(t, err)
+	a.Runner = &linkRunner{srcID: src.ID, dstID: dst.ID}
+
+	if _, err := a.WikiLink(context.Background(), WikiLinkOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	// Second run: dst is already linked, so a.Candidates drops it -> no proposal,
+	// nothing written, and (if it were re-proposed) it would be skipped.
+	res, err := a.WikiLink(context.Background(), WikiLinkOptions{})
+	must(t, err)
+	if len(res.Written) != 0 {
+		t.Fatalf("second run wrote %+v, want nothing", res.Written)
+	}
+	got, _, _ := a.Store.Get(src.ID)
+	if len(got.Links) != 1 {
+		t.Fatalf("idempotency broken: source links = %+v", got.Links)
 	}
 }

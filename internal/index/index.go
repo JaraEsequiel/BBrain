@@ -33,15 +33,29 @@ CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
 	project UNINDEXED
 );`
 
+// linksSchema is a plain (non-FTS) table mirroring each fact's reasoned wikilinks.
+// Like facts_fts it is derived from the .md and rebuilt on reindex. Targets are
+// stored as bare fact ids (the [[ ]] wrapping is stripped on the way in).
+const linksSchema = `
+CREATE TABLE IF NOT EXISTS links (
+	src_id   TEXT NOT NULL,
+	dst_id   TEXT NOT NULL,
+	relation TEXT NOT NULL,
+	why      TEXT NOT NULL,
+	PRIMARY KEY (src_id, dst_id, relation)
+);`
+
 // Open opens (or creates) the index at path. Use ":memory:" for tests.
 func Open(path string) (*Index, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(schema); err != nil {
-		db.Close()
-		return nil, err
+	for _, stmt := range []string{schema, linksSchema} {
+		if _, err := db.Exec(stmt); err != nil {
+			db.Close()
+			return nil, err
+		}
 	}
 	return &Index{db: db}, nil
 }
@@ -72,10 +86,110 @@ func (ix *Index) IndexFact(f fact.Fact, path string) error {
 	return tx.Commit()
 }
 
-// Clear empties the index (used before a full reindex).
+// IndexLinks mirrors a fact's reasoned wikilinks into the links table: it removes
+// any existing edges originating from f.ID, then inserts one row per link. Targets
+// are normalized to bare fact ids; empty targets are skipped. Dangling edges (a
+// dst_id with no indexed fact) are allowed — they still answer graph queries.
+func (ix *Index) IndexLinks(f fact.Fact) error {
+	tx, err := ix.db.Begin()
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM links WHERE src_id = ?`, f.ID); err != nil {
+		tx.Rollback()
+		return err
+	}
+	for _, l := range f.Links {
+		dst := fact.LinkTargetID(l.Target)
+		if dst == "" {
+			continue
+		}
+		if _, err := tx.Exec(
+			`INSERT OR REPLACE INTO links (src_id, dst_id, relation, why) VALUES (?, ?, ?, ?)`,
+			f.ID, dst, l.Relation, l.Why,
+		); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// Edge is one reasoned graph edge.
+type Edge struct {
+	SrcID    string
+	DstID    string
+	Relation string
+	Why      string
+}
+
+// Neighbor is a fact connected to a given fact, with the relation, its why, and
+// the direction relative to the queried fact ("out": this fact links to FactID;
+// "in": FactID links to this fact).
+type Neighbor struct {
+	FactID    string
+	Relation  string
+	Why       string
+	Direction string
+}
+
+// Why returns the reasoned edges directly connecting a and b, in either direction
+// — this answers "why is A related to B". Empty when there is no direct link.
+func (ix *Index) Why(aID, bID string) ([]Edge, error) {
+	rows, err := ix.db.Query(
+		`SELECT src_id, dst_id, relation, why FROM links
+		 WHERE (src_id = ? AND dst_id = ?) OR (src_id = ? AND dst_id = ?)
+		 ORDER BY src_id, dst_id, relation`,
+		aID, bID, bID, aID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Edge
+	for rows.Next() {
+		var e Edge
+		if err := rows.Scan(&e.SrcID, &e.DstID, &e.Relation, &e.Why); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// Neighbors returns every fact linked to or from id, with direction. Out-edges
+// (id -> X) come first, then in-edges (Y -> id), each ordered by the other fact's
+// id for deterministic output.
+func (ix *Index) Neighbors(id string) ([]Neighbor, error) {
+	rows, err := ix.db.Query(
+		`SELECT dst_id, relation, why, 'out' AS dir FROM links WHERE src_id = ?
+		 UNION ALL
+		 SELECT src_id, relation, why, 'in' AS dir FROM links WHERE dst_id = ?
+		 ORDER BY 4, 1`,
+		id, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Neighbor
+	for rows.Next() {
+		var n Neighbor
+		if err := rows.Scan(&n.FactID, &n.Relation, &n.Why, &n.Direction); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// Clear empties the index (used before a full reindex): both the FTS table and
+// the derived links table.
 func (ix *Index) Clear() error {
-	_, err := ix.db.Exec(`DELETE FROM facts_fts`)
-	return err
+	for _, stmt := range []string{`DELETE FROM facts_fts`, `DELETE FROM links`} {
+		if _, err := ix.db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Result is one search hit.
@@ -87,9 +201,20 @@ type Result struct {
 	Path    string
 }
 
-// Search runs an FTS5 MATCH over title/body/tags/topic_key, ranked by BM25.
+// Search runs an FTS5 MATCH over title/body/tags/topic_key (all query terms
+// AND-ed), ranked by BM25.
 func (ix *Index) Search(query string, limit int) ([]Result, error) {
-	match := buildMatch(query)
+	return ix.search(buildMatch(query), limit)
+}
+
+// SearchAny is like Search but matches facts containing ANY of the query terms
+// (OR semantics), ranked by BM25. It powers candidate/correlation discovery, where
+// a strict AND would miss facts that only partially overlap.
+func (ix *Index) SearchAny(query string, limit int) ([]Result, error) {
+	return ix.search(buildMatchAny(query), limit)
+}
+
+func (ix *Index) search(match string, limit int) ([]Result, error) {
 	if match == "" {
 		return nil, nil
 	}
@@ -126,4 +251,16 @@ func buildMatch(q string) string {
 		quoted = append(quoted, `"`+f+`"`)
 	}
 	return strings.Join(quoted, " ")
+}
+
+// buildMatchAny is like buildMatch but OR-joins the quoted tokens, so a fact
+// matching any single term is returned.
+func buildMatchAny(q string) string {
+	fields := strings.Fields(q)
+	quoted := make([]string, 0, len(fields))
+	for _, f := range fields {
+		f = strings.ReplaceAll(f, `"`, `""`)
+		quoted = append(quoted, `"`+f+`"`)
+	}
+	return strings.Join(quoted, " OR ")
 }

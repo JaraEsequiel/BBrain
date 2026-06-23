@@ -52,3 +52,54 @@ func TestEndToEndSaveAndSearch(t *testing.T) {
 		t.Fatalf("search output = %q, want it to contain the saved title", out.String())
 	}
 }
+
+func TestEndToEndLinkWhyRelated(t *testing.T) {
+	t.Setenv("BBRAIN_HOME", t.TempDir())
+	var out, errOut bytes.Buffer
+
+	if code := run([]string{"init"}, &out, &errOut); code != 0 {
+		t.Fatalf("init failed: %s", errOut.String())
+	}
+
+	// save prints "saved <id>"; capture the id back.
+	saved := func(title, typ, body string) string {
+		t.Helper()
+		out.Reset()
+		errOut.Reset()
+		code := run([]string{"save", "--title", title, "--project", "bbrain",
+			"--type", typ, "--body", body}, &out, &errOut)
+		if code != 0 {
+			t.Fatalf("save %q failed: %s", title, errOut.String())
+		}
+		return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out.String()), "saved "))
+	}
+
+	id1 := saved("Auth model", "architecture", "jwt")
+	id2 := saved("Session storage", "decision", "redis")
+
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"link", "--from", id1, "--to", id2,
+		"--relation", "depends-on", "--why", "auth assumes session storage"}, &out, &errOut); code != 0 {
+		t.Fatalf("link failed: %s", errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"why", id1, id2}, &out, &errOut); code != 0 {
+		t.Fatalf("why failed: %s", errOut.String())
+	}
+	if !strings.Contains(out.String(), "depends-on") ||
+		!strings.Contains(out.String(), "auth assumes session storage") {
+		t.Fatalf("why output = %q", out.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"related", id1}, &out, &errOut); code != 0 {
+		t.Fatalf("related failed: %s", errOut.String())
+	}
+	if !strings.Contains(out.String(), id2) {
+		t.Fatalf("related output = %q, want it to mention %s", out.String(), id2)
+	}
+}

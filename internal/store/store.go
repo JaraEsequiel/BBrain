@@ -5,6 +5,7 @@ package store
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,6 +142,72 @@ func (s *Store) ListFacts() ([]fact.Fact, error) {
 		out = append(out, f)
 	}
 	return out, nil
+}
+
+// Get loads a single fact by id. ok is false (with a nil error) when no .md with
+// that id exists under the brain's facts dir.
+func (s *Store) Get(id string) (fact.Fact, bool, error) {
+	data, err := os.ReadFile(filepath.Join(s.Brain.FactsDir(), id+".md"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fact.Fact{}, false, nil
+		}
+		return fact.Fact{}, false, err
+	}
+	f, err := fact.Parse(string(data))
+	if err != nil {
+		return fact.Fact{}, false, err
+	}
+	return f, true, nil
+}
+
+// AddLink adds (or updates) a reasoned wikilink from srcID to dstID on the source
+// fact's .md frontmatter. Both facts must exist and relation must be in the
+// controlled vocabulary; why is mandatory. If a link to dstID already exists, its
+// relation and why are overwritten in place (no duplicate edge). The source .md is
+// rewritten atomically and its updated_at is bumped; revision_count is left
+// untouched because a link edit is not a content revision.
+func (s *Store) AddLink(srcID, dstID, relation, why string) (fact.Fact, error) {
+	if !fact.ValidRelation(relation) {
+		return fact.Fact{}, fmt.Errorf("store: invalid relation %q", relation)
+	}
+	if why == "" {
+		return fact.Fact{}, fmt.Errorf("store: link why is required")
+	}
+	src, ok, err := s.Get(srcID)
+	if err != nil {
+		return fact.Fact{}, err
+	}
+	if !ok {
+		return fact.Fact{}, fmt.Errorf("store: source fact %q not found", srcID)
+	}
+	if _, ok, err := s.Get(dstID); err != nil {
+		return fact.Fact{}, err
+	} else if !ok {
+		return fact.Fact{}, fmt.Errorf("store: target fact %q not found", dstID)
+	}
+
+	updated := false
+	for i := range src.Links {
+		if fact.LinkTargetID(src.Links[i].Target) == dstID {
+			src.Links[i].Relation = relation
+			src.Links[i].Why = why
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		src.Links = append(src.Links, fact.Link{
+			Target:   fact.FormatTarget(dstID),
+			Relation: relation,
+			Why:      why,
+		})
+	}
+	src.UpdatedAt = s.Now().UTC().Format(time.RFC3339)
+	if err := s.write(src); err != nil {
+		return fact.Fact{}, err
+	}
+	return src, nil
 }
 
 func contentHash(in SaveInput) string {

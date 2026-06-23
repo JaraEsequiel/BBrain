@@ -5,6 +5,7 @@ package fact
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -118,6 +119,14 @@ func NewID(date, title string) string {
 // Relations is the controlled vocabulary for reasoned wikilink relations,
 // ported from engram. A link's relation must be one of these.
 var Relations = []string{"relates", "depends-on", "conflicts-with", "supersedes", "scoped", "compatible"}
+
+var idRE = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+// ValidID reports whether id is a safe fact identifier: lowercase-alphanumeric
+// segments joined by single hyphens (the shape NewID produces). It rejects path
+// separators, "..", whitespace, and uppercase, so an id from untrusted input
+// (e.g. an MCP tool argument) can never escape the facts directory.
+func ValidID(id string) bool { return idRE.MatchString(id) }
 
 // ValidRelation reports whether r is one of the allowed relation types.
 func ValidRelation(r string) bool {

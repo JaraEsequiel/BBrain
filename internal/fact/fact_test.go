@@ -96,3 +96,16 @@ func TestLinkTargetRoundTrip(t *testing.T) {
 		t.Fatalf("LinkTargetID(messy) = %q, want %q", got, "session-model")
 	}
 }
+
+func TestValidID(t *testing.T) {
+	for _, g := range []string{"2026-06-23-use-jwt", "f1", "a-b-c"} {
+		if !ValidID(g) {
+			t.Fatalf("ValidID(%q)=false, want true", g)
+		}
+	}
+	for _, b := range []string{"", "../etc", "a/b", "a..b", "A", "a_b", "a b", "..", "/etc/passwd"} {
+		if ValidID(b) {
+			t.Fatalf("ValidID(%q)=true, want false", b)
+		}
+	}
+}

@@ -24,6 +24,12 @@ func New(root string) *App {
 	return &App{Store: store.New(b), Brain: b}
 }
 
+// ensureIndexDir creates the directory that holds the derived index, so the
+// index can be opened for writing even on a freshly cleaned brain.
+func (a *App) ensureIndexDir() error {
+	return os.MkdirAll(filepath.Dir(a.Brain.IndexPath()), 0755)
+}
+
 // Init creates the brain structure and builds an initial (empty) index.
 func (a *App) Init() error {
 	if err := a.Brain.Init(); err != nil {
@@ -40,9 +46,7 @@ func (a *App) Reindex() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	// Ensure the .bbrain directory exists for the index file.
-	indexDir := filepath.Dir(a.Brain.IndexPath())
-	if err := os.MkdirAll(indexDir, 0755); err != nil {
+	if err := a.ensureIndexDir(); err != nil {
 		return 0, err
 	}
 	ix, err := index.Open(a.Brain.IndexPath())
@@ -67,9 +71,7 @@ func (a *App) Save(in store.SaveInput) (fact.Fact, error) {
 	if err != nil {
 		return fact.Fact{}, err
 	}
-	// Ensure the .bbrain directory exists for the index file.
-	indexDir := filepath.Dir(a.Brain.IndexPath())
-	if err := os.MkdirAll(indexDir, 0755); err != nil {
+	if err := a.ensureIndexDir(); err != nil {
 		return fact.Fact{}, err
 	}
 	ix, err := index.Open(a.Brain.IndexPath())

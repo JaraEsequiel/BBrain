@@ -3,8 +3,10 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"bbrain/internal/brain"
 	"bbrain/internal/fact"
@@ -61,6 +63,9 @@ func (a *App) Reindex() (int, error) {
 		if err := ix.IndexFact(f, a.Store.PathFor(f)); err != nil {
 			return 0, err
 		}
+		if err := ix.IndexLinks(f); err != nil {
+			return 0, err
+		}
 	}
 	return len(facts), nil
 }
@@ -96,4 +101,99 @@ func (a *App) Search(query string, limit int) ([]index.Result, error) {
 	}
 	defer ix.Close()
 	return ix.Search(query, limit)
+}
+
+// Link adds (or updates) a reasoned wikilink from srcID to dstID on the source
+// fact's .md, then incrementally re-indexes that fact's edges.
+func (a *App) Link(srcID, dstID, relation, why string) (fact.Fact, error) {
+	f, err := a.Store.AddLink(srcID, dstID, relation, why)
+	if err != nil {
+		return fact.Fact{}, err
+	}
+	if err := a.ensureIndexDir(); err != nil {
+		return fact.Fact{}, err
+	}
+	ix, err := index.Open(a.Brain.IndexPath())
+	if err != nil {
+		return fact.Fact{}, err
+	}
+	defer ix.Close()
+	if err := ix.IndexLinks(f); err != nil {
+		return fact.Fact{}, err
+	}
+	return f, nil
+}
+
+// Why returns the reasoned edges directly connecting two facts (either direction).
+func (a *App) Why(aID, bID string) ([]index.Edge, error) {
+	if err := a.ensureIndexDir(); err != nil {
+		return nil, err
+	}
+	ix, err := index.Open(a.Brain.IndexPath())
+	if err != nil {
+		return nil, err
+	}
+	defer ix.Close()
+	return ix.Why(aID, bID)
+}
+
+// Related returns every fact linked to or from id, with direction.
+func (a *App) Related(id string) ([]index.Neighbor, error) {
+	if err := a.ensureIndexDir(); err != nil {
+		return nil, err
+	}
+	ix, err := index.Open(a.Brain.IndexPath())
+	if err != nil {
+		return nil, err
+	}
+	defer ix.Close()
+	return ix.Neighbors(id)
+}
+
+// Candidates surfaces facts lexically similar to the given fact but not yet linked
+// to it — the raw material for spotting correlations and conflicts. It OR-matches
+// the fact's title and tags against the FTS index, then drops the fact itself and
+// anything it already links to. Returns at most limit results.
+func (a *App) Candidates(id string, limit int) ([]index.Result, error) {
+	f, ok, err := a.Store.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("candidates: fact %q not found", id)
+	}
+	linked := map[string]bool{id: true}
+	for _, l := range f.Links {
+		linked[fact.LinkTargetID(l.Target)] = true
+	}
+	terms := f.Title
+	if len(f.Tags) > 0 {
+		terms += " " + strings.Join(f.Tags, " ")
+	}
+
+	if err := a.ensureIndexDir(); err != nil {
+		return nil, err
+	}
+	ix, err := index.Open(a.Brain.IndexPath())
+	if err != nil {
+		return nil, err
+	}
+	defer ix.Close()
+	// Over-fetch so that, after dropping self + already-linked, we can still return
+	// up to limit results.
+	res, err := ix.SearchAny(terms, limit+len(linked))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]index.Result, 0, limit)
+	for _, r := range res {
+		if linked[r.FactID] {
+			continue
+		}
+		out = append(out, r)
+		if len(out) == limit {
+			break
+		}
+	}
+	return out, nil
 }

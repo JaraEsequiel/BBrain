@@ -1,0 +1,116 @@
+// Package fact defines the on-disk Markdown memory format and its (de)serialization.
+// The .md file is the source of truth; this package is the only place that knows
+// how a Fact is laid out as frontmatter + an H1 title + a body.
+package fact
+
+import (
+	"fmt"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Link is a reasoned, typed wikilink between two facts.
+type Link struct {
+	Target   string `yaml:"target"`
+	Relation string `yaml:"relation"`
+	Why      string `yaml:"why"`
+}
+
+// Fact is one memory. Frontmatter fields carry the structured metadata; Title and
+// Body are derived from the markdown content below the frontmatter and are never
+// serialized into YAML (yaml:"-").
+type Fact struct {
+	ID            string   `yaml:"id"`
+	Type          string   `yaml:"type"`
+	Scope         string   `yaml:"scope"`
+	Project       string   `yaml:"project"`
+	TopicKey      string   `yaml:"topic_key,omitempty"`
+	Tags          []string `yaml:"tags,omitempty"`
+	Links         []Link   `yaml:"links,omitempty"`
+	CreatedAt     string   `yaml:"created_at"`
+	UpdatedAt     string   `yaml:"updated_at"`
+	RevisionCount int      `yaml:"revision_count"`
+
+	Title string `yaml:"-"`
+	Body  string `yaml:"-"`
+}
+
+const delim = "---"
+
+// Marshal renders a Fact as: frontmatter, then "# Title", then the body.
+func Marshal(f Fact) string {
+	fm, _ := yaml.Marshal(f) // Fact has no unmarshalable fields
+	var sb strings.Builder
+	sb.WriteString(delim + "\n")
+	sb.Write(fm)
+	sb.WriteString(delim + "\n\n")
+	sb.WriteString("# " + f.Title + "\n\n")
+	sb.WriteString(strings.TrimRight(f.Body, "\n"))
+	sb.WriteString("\n")
+	return sb.String()
+}
+
+// Parse is the inverse of Marshal. It requires leading frontmatter delimited by
+// "---" lines, then reads the first "# " line as the title and the remainder as
+// the body.
+func Parse(s string) (Fact, error) {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	if !strings.HasPrefix(s, delim+"\n") {
+		return Fact{}, fmt.Errorf("fact: missing opening frontmatter delimiter")
+	}
+	rest := s[len(delim)+1:]
+	end := strings.Index(rest, "\n"+delim+"\n")
+	if end < 0 {
+		return Fact{}, fmt.Errorf("fact: missing closing frontmatter delimiter")
+	}
+	fmText := rest[:end]
+	body := rest[end+len("\n"+delim+"\n"):]
+
+	var f Fact
+	if err := yaml.Unmarshal([]byte(fmText), &f); err != nil {
+		return Fact{}, fmt.Errorf("fact: bad frontmatter yaml: %w", err)
+	}
+
+	body = strings.TrimLeft(body, "\n")
+	if strings.HasPrefix(body, "# ") {
+		nl := strings.IndexByte(body, '\n')
+		if nl < 0 {
+			f.Title = strings.TrimSpace(body[2:])
+			f.Body = ""
+			return f, nil
+		}
+		f.Title = strings.TrimSpace(body[2:nl])
+		body = body[nl+1:]
+	}
+	f.Body = strings.Trim(body, "\n")
+	return f, nil
+}
+
+// Slug converts a title into a filesystem-safe kebab-case slug.
+func Slug(title string) string {
+	var sb strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(title)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			sb.WriteRune(r)
+			prevDash = false
+		default:
+			if !prevDash && sb.Len() > 0 {
+				sb.WriteByte('-')
+				prevDash = true
+			}
+		}
+	}
+	out := strings.Trim(sb.String(), "-")
+	if out == "" {
+		return "untitled"
+	}
+	return out
+}
+
+// NewID builds a stable id of the form "<date>-<slug>".
+func NewID(date, title string) string {
+	return date + "-" + Slug(title)
+}

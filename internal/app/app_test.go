@@ -51,3 +51,14 @@ func TestReindexRebuildsFromDisk(t *testing.T) {
 		t.Fatalf("Search after reindex = %+v, want 1", res)
 	}
 }
+
+func TestSearchOnUninitializedBrainReturnsNoResults(t *testing.T) {
+	a := New(t.TempDir()) // note: no Init() — .bbrain/ does not exist
+	res, err := a.Search("anything", 10)
+	if err != nil {
+		t.Fatalf("Search on uninitialized brain should not error, got: %v", err)
+	}
+	if len(res) != 0 {
+		t.Fatalf("Search on empty index = %+v, want no results", res)
+	}
+}

@@ -87,6 +87,9 @@ func (a *App) Save(in store.SaveInput) (fact.Fact, error) {
 
 // Search runs a lexical search over the index.
 func (a *App) Search(query string, limit int) ([]index.Result, error) {
+	if err := a.ensureIndexDir(); err != nil {
+		return nil, err
+	}
 	ix, err := index.Open(a.Brain.IndexPath())
 	if err != nil {
 		return nil, err

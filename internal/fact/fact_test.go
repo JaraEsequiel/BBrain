@@ -68,3 +68,31 @@ func TestParseRejectsMissingFrontmatter(t *testing.T) {
 		t.Fatal("Parse should error when frontmatter delimiters are missing")
 	}
 }
+
+func TestValidRelation(t *testing.T) {
+	for _, r := range []string{"relates", "depends-on", "conflicts-with", "supersedes", "scoped", "compatible"} {
+		if !ValidRelation(r) {
+			t.Errorf("ValidRelation(%q) = false, want true", r)
+		}
+	}
+	if ValidRelation("frobnicates") {
+		t.Error("ValidRelation(frobnicates) = true, want false")
+	}
+	if ValidRelation("") {
+		t.Error("ValidRelation(\"\") = true, want false")
+	}
+}
+
+func TestLinkTargetRoundTrip(t *testing.T) {
+	id := "2026-06-22-postgres-vs-mysql"
+	if got := FormatTarget(id); got != "[[2026-06-22-postgres-vs-mysql]]" {
+		t.Fatalf("FormatTarget = %q", got)
+	}
+	if got := LinkTargetID(FormatTarget(id)); got != id {
+		t.Fatalf("LinkTargetID(FormatTarget(id)) = %q, want %q", got, id)
+	}
+	// Tolerates a bare slug and surrounding whitespace.
+	if got := LinkTargetID("  [[session-model]] "); got != "session-model" {
+		t.Fatalf("LinkTargetID(messy) = %q, want %q", got, "session-model")
+	}
+}

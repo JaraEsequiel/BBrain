@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"bbrain/internal/index"
@@ -167,5 +169,52 @@ func TestCandidatesExcludesSelfAndLinked(t *testing.T) {
 	must(t, err)
 	if containsID(cands2, f2.ID) {
 		t.Fatalf("candidates must exclude an already-linked fact: %+v", cands2)
+	}
+}
+
+type appFakeRunner struct {
+	out       string
+	gotPrompt string
+}
+
+func (f *appFakeRunner) Run(ctx context.Context, prompt string) (string, error) {
+	f.gotPrompt = prompt
+	return f.out, nil
+}
+
+func TestWikiBuildWiringWithFakeRunner(t *testing.T) {
+	a := New(t.TempDir())
+	must(t, a.Init())
+	f1, err := a.Save(store.SaveInput{Type: "decision", Title: "Use JWT", Body: "jwt",
+		Project: "shopapp", Scope: "project"})
+	must(t, err)
+	a.Runner = &appFakeRunner{out: `{"pages":[{"slug":"auth-model","category":"decisions","title":"Auth model","sources":["` + f1.ID + `"],"body":"# Auth model","change_reason":"created"}]}`}
+
+	res, err := a.WikiBuild(context.Background(), WikiBuildOptions{})
+	must(t, err)
+	if len(res.Written) != 1 || res.Written[0] != "projects/shopapp/decisions/auth-model.md" {
+		t.Fatalf("written = %+v", res.Written)
+	}
+}
+
+func TestWikiBuildFiltersByProject(t *testing.T) {
+	a := New(t.TempDir())
+	must(t, a.Init())
+	if _, err := a.Save(store.SaveInput{Type: "decision", Title: "Alpha", Body: "a", Project: "shopapp", Scope: "project"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Save(store.SaveInput{Type: "decision", Title: "Beta", Body: "b", Project: "datacli", Scope: "project"}); err != nil {
+		t.Fatal(err)
+	}
+	fr := &appFakeRunner{out: `{"pages":[]}`}
+	a.Runner = fr
+	if _, err := a.WikiBuild(context.Background(), WikiBuildOptions{Project: "datacli"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(fr.gotPrompt, "title: Alpha") {
+		t.Fatalf("project filter leaked shopapp fact into prompt:\n%s", fr.gotPrompt)
+	}
+	if !strings.Contains(fr.gotPrompt, "title: Beta") {
+		t.Fatalf("project filter dropped the datacli fact:\n%s", fr.gotPrompt)
 	}
 }

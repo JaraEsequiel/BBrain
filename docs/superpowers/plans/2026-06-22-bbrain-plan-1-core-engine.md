@@ -32,6 +32,7 @@ Each plan produces working, testable software on its own. We write the next plan
 3. **Plan 3 — Wiki layer + pluggable LLM routine:** `wiki/` ingest/lint orchestration, `wiki_build`/`wiki_lint`, `wiki/index.md` + `wiki/log.md` maintenance.
 4. **Plan 4 — MCP server + tools:** `bbrain mcp` (stdio) exposing `mem_save`, `mem_search`, `mem_context`, `mem_get`, `mem_update`, `mem_delete`, sessions, `mem_current_project`, `wiki_*`.
 5. **Plan 5 — TUI install + agent integration:** `bbrain init`/`bbrain setup <agent>` TUI, Claude Code hooks plugin, managed `BEGIN/END` block for hookless agents, watcher-driven auto-reindex.
+6. **Plan 6 — Relocatable memory vault (after the TUI):** `bbrain vault move <dest>` moves the whole brain to a user-chosen location, updates the persistent location pointer the TUI introduced (Plan 5), reindexes (the FTS `path` column holds absolute paths, so a move requires a rebuild — clean because the index is disposable), and refreshes any agent-integration blocks/hooks that embed the old path. Depends on Plan 5 because it reuses that persistent location config and the agent-integration plumbing.
 
 ---
 

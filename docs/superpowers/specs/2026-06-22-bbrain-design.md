@@ -205,6 +205,7 @@ bbrain save <title> <content>
 bbrain wiki build|lint  # Dispara el LLM routine
 bbrain mcp [--tools=…]   # MCP stdio server
 bbrain tui              # Terminal UI
+bbrain vault move <dst> # Reubica el brain a otra ruta (post-TUI; ver abajo)
 bbrain doctor           # Diagnósticos
 ```
 
@@ -215,6 +216,24 @@ bbrain doctor           # Diagnósticos
 - Generar la estructura (`CLAUDE.md`, `raws/facts/`, `raws/user-raws/`,
   `wiki/index.md`, `wiki/log.md`).
 - Correr el setup de integración por agente (ver abajo).
+- Persistir un **puntero de ubicación** del brain activo (config), para que las
+  tools/CLI lo encuentren sin depender de `BBRAIN_HOME` en cada invocación.
+
+### Reubicar el vault (`bbrain vault move`) — posterior al TUI
+
+Capacidad para **mover el brain a la ubicación que el usuario quiera** después de
+instalado. Se construye **sobre el TUI** (depende del puntero de ubicación
+persistente y del plumbing de integración por agente que introduce el install), por
+eso va después:
+
+- Mueve el directorio del brain a `<dst>` (con validación: destino vacío/inexistente,
+  mismo filesystem o copia+verificación, no solapar con un brain existente).
+- Actualiza el **puntero de ubicación** persistente.
+- **Reindexa**: la columna `path` del FTS guarda rutas absolutas, así que un move las
+  invalida; el reindex las regenera (limpio porque el índice es derivado/desechable).
+- Refresca los **bloques de integración por agente / hooks** que embeben la ruta
+  antigua (managed `BEGIN/END`), sin pisar lo demás.
+- El TUI ofrece la misma acción ("mover vault") además del comando CLI.
 
 ### Integración con agentes (cómo el agente usa BBrain en su trabajo diario)
 
@@ -294,6 +313,7 @@ conviene, no forkeamos.
 | Orquestación LLM | BBrain orquesta, LLM enchufable (estilo `ENGRAM_AGENT_CLI`) |
 | Wikilinks | Tipados y **razonados** (`target` + `relation` + `why` obligatorio) |
 | Alcance de la memoria | Brain único, **cross-session y cross-project**; separación por `project`/`scope` en frontmatter |
+| Ubicación del vault | Reubicable (`bbrain vault move`), **posterior al TUI**: puntero de ubicación persistente + reindex (paths absolutos) + refresco de integración por agente |
 | `CLAUDE.md` del brain | Schema, solo para abrir un cowork dentro de la carpeta del brain; **no** es la integración con el agente |
 | Integración con agentes | Claude Code: hooks efímeros (no toca CLAUDE.md global). Otros: bloque gestionado BEGIN/END. Acceso real vía MCP tools |
 | Sync | Ninguno; instalación local, git opcional a cargo del usuario |

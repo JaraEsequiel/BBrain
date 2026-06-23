@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"bbrain/internal/brain"
 	"bbrain/internal/fact"
@@ -251,4 +252,120 @@ func (a *App) WikiBuild(ctx context.Context, opts WikiBuildOptions) (wiki.BuildR
 		Now:        a.Store.Now,
 		DryRun:     opts.DryRun,
 	})
+}
+
+// WikiLinkOptions configures App.WikiLink.
+type WikiLinkOptions struct {
+	Project string
+	Scope   string
+	Limit   int // max FTS candidates per fact; <=0 means 8
+	DryRun  bool
+}
+
+// snippet collapses whitespace in body and returns at most max runes — enough
+// context for the LLM to judge relatedness without sending the whole body.
+func snippet(body string, max int) string {
+	s := strings.Join(strings.Fields(body), " ")
+	r := []rune(s)
+	if len(r) > max {
+		return string(r[:max])
+	}
+	return s
+}
+
+// WikiLink grows the reasoned fact graph: for each fact (optionally filtered by
+// project/scope) it gathers FTS candidates, asks the LLM which are related and
+// how, validates, and writes the new links via a.Link. Re-runs are idempotent
+// (Candidates already excludes already-linked facts). On --dry-run nothing is
+// written.
+func (a *App) WikiLink(ctx context.Context, opts WikiLinkOptions) (wiki.LinkResult, error) {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 8
+	}
+	facts, err := a.Store.ListFacts()
+	if err != nil {
+		return wiki.LinkResult{}, err
+	}
+	var filtered []fact.Fact
+	for _, f := range facts {
+		if opts.Project != "" && f.Project != opts.Project {
+			continue
+		}
+		if opts.Scope != "" && f.Scope != opts.Scope {
+			continue
+		}
+		filtered = append(filtered, f)
+	}
+
+	candMap := map[string][]wiki.Candidate{}
+	for _, f := range filtered {
+		res, err := a.Candidates(f.ID, limit)
+		if err != nil {
+			return wiki.LinkResult{}, err
+		}
+		var cs []wiki.Candidate
+		for _, r := range res {
+			snip := ""
+			if cf, ok, err := a.Store.Get(r.FactID); err != nil {
+				return wiki.LinkResult{}, err
+			} else if ok {
+				snip = snippet(cf.Body, 240)
+			}
+			cs = append(cs, wiki.Candidate{ID: r.FactID, Title: r.Title, Type: r.Type, Project: r.Project, Snippet: snip})
+		}
+		candMap[f.ID] = cs
+	}
+
+	proposals, err := wiki.Link(ctx, wiki.LinkOptions{Facts: filtered, Candidates: candMap, Runner: a.Runner})
+	if err != nil {
+		return wiki.LinkResult{}, err
+	}
+
+	var written []wiki.Edge
+	skipped := 0
+	for _, fp := range proposals {
+		src, ok, err := a.Store.Get(fp.Src)
+		if err != nil {
+			return wiki.LinkResult{}, err
+		}
+		linked := map[string]bool{}
+		if ok {
+			for _, l := range src.Links {
+				linked[fact.LinkTargetID(l.Target)] = true
+			}
+		}
+		for _, p := range fp.Links {
+			if linked[p.Dst] {
+				skipped++
+				continue
+			}
+			if !opts.DryRun {
+				if _, err := a.Link(fp.Src, p.Dst, p.Relation, p.Why); err != nil {
+					return wiki.LinkResult{}, err
+				}
+			}
+			written = append(written, wiki.Edge{Src: fp.Src, Dst: p.Dst, Relation: p.Relation, Why: p.Why})
+		}
+	}
+
+	if !opts.DryRun && len(written) > 0 {
+		now := a.Store.Now().UTC().Format(time.RFC3339)
+		var sb strings.Builder
+		sb.WriteString("\n## " + now + " — wiki link\n")
+		for _, e := range written {
+			sb.WriteString(fmt.Sprintf("- %s -[%s]-> %s: %s\n", e.Src, e.Relation, e.Dst, e.Why))
+		}
+		if skipped > 0 {
+			sb.WriteString(fmt.Sprintf("- (skipped %d already-linked)\n", skipped))
+		}
+		if err := os.MkdirAll(a.Brain.WikiDir(), 0o755); err != nil {
+			return wiki.LinkResult{}, err
+		}
+		if err := wiki.AppendLog(a.Brain.WikiDir(), sb.String()); err != nil {
+			return wiki.LinkResult{}, err
+		}
+	}
+
+	return wiki.LinkResult{Written: written, Skipped: skipped, DryRun: opts.DryRun}, nil
 }

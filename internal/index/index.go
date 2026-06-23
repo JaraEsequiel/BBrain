@@ -117,20 +117,20 @@ func (ix *Index) IndexLinks(f fact.Fact) error {
 
 // Edge is one reasoned graph edge.
 type Edge struct {
-	SrcID    string
-	DstID    string
-	Relation string
-	Why      string
+	SrcID    string `json:"src_id"`
+	DstID    string `json:"dst_id"`
+	Relation string `json:"relation"`
+	Why      string `json:"why"`
 }
 
 // Neighbor is a fact connected to a given fact, with the relation, its why, and
 // the direction relative to the queried fact ("out": this fact links to FactID;
 // "in": FactID links to this fact).
 type Neighbor struct {
-	FactID    string
-	Relation  string
-	Why       string
-	Direction string
+	FactID    string `json:"fact_id"`
+	Relation  string `json:"relation"`
+	Why       string `json:"why"`
+	Direction string `json:"direction"`
 }
 
 // Why returns the reasoned edges directly connecting a and b, in either direction
@@ -200,11 +200,11 @@ func (ix *Index) Clear() error {
 
 // Result is one search hit.
 type Result struct {
-	FactID  string
-	Title   string
-	Type    string
-	Project string
-	Path    string
+	FactID  string `json:"fact_id"`
+	Title   string `json:"title"`
+	Type    string `json:"type"`
+	Project string `json:"project"`
+	Path    string `json:"path"`
 }
 
 // Search runs an FTS5 MATCH over title/body/tags/topic_key (all query terms

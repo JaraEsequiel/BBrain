@@ -274,3 +274,15 @@ func TestDelete(t *testing.T) {
 		t.Fatalf("second Delete = %v, %v; want false, nil", again, err)
 	}
 }
+
+func TestGetDeleteRejectUnsafeID(t *testing.T) {
+	s := newTestStore(t)
+	for _, id := range []string{"../../etc", "a/b", "..", "bad space"} {
+		if _, _, err := s.Get(id); err == nil {
+			t.Fatalf("Get(%q) should reject unsafe id", id)
+		}
+		if _, err := s.Delete(id); err == nil {
+			t.Fatalf("Delete(%q) should reject unsafe id", id)
+		}
+	}
+}

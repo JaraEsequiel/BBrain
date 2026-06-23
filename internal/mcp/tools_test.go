@@ -108,3 +108,37 @@ func mustID(t *testing.T, out string) string {
 type fakeBuildRunner struct{ out string }
 
 func (f fakeBuildRunner) Run(ctx context.Context, prompt string) (string, error) { return f.out, nil }
+
+func TestMemDeleteRejectsTraversal(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := toolByName(t, "mem_delete").Handler(context.Background(), a, json.RawMessage(`{"id":"../../victim"}`)); err == nil {
+		t.Fatal("mem_delete must reject a traversal id with an error")
+	}
+}
+
+func TestMemSearchResultUsesSnakeCase(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	call(t, a, "mem_save", `{"type":"decision","title":"JWT thing","body":"b","project":"p","scope":"project"}`)
+	sr := call(t, a, "mem_search", `{"query":"jwt"}`)
+	if !strings.Contains(sr, `"fact_id"`) {
+		t.Fatalf("mem_search result not snake_case: %s", sr)
+	}
+}
+
+func TestMemSaveTopicKeyUpsert(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	id1 := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"V1","body":"b1","project":"p","scope":"project","topic_key":"auth/jwt"}`))
+	id2 := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"V2","body":"b2","project":"p","scope":"project","topic_key":"auth/jwt"}`))
+	if id1 != id2 {
+		t.Fatalf("topic_key upsert created a new id: %s vs %s", id1, id2)
+	}
+}

@@ -297,3 +297,41 @@ func TestEndToEndWikiLintFix(t *testing.T) {
 		t.Fatalf("dangling link not dropped from source:\n%s", b)
 	}
 }
+
+func runStdin(t *testing.T, args []string, stdin string, out, errOut *bytes.Buffer) int {
+	t.Helper()
+	return runWithIn(args, strings.NewReader(stdin), out, errOut)
+}
+
+func TestEndToEndMCP(t *testing.T) {
+	t.Setenv("BBRAIN_HOME", t.TempDir())
+	var out, errOut bytes.Buffer
+	if code := run([]string{"init"}, &out, &errOut); code != 0 {
+		t.Fatalf("init: %s", errOut.String())
+	}
+	// Drive the server over stdin/stdout via run(): initialize, then save+search.
+	reqs := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mem_save","arguments":{"type":"decision","title":"Use JWT","body":"stateless","project":"shopapp","scope":"project"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mem_search","arguments":{"query":"jwt"}}}`,
+	}, "\n") + "\n"
+
+	out.Reset()
+	errOut.Reset()
+	code := runStdin(t, []string{"mcp"}, reqs, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("mcp exit=%d err=%s", code, errOut.String())
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	// Expect 3 responses (initialize, mem_save, mem_search); the notification yields none.
+	if len(lines) != 3 {
+		t.Fatalf("want 3 responses, got %d:\n%s", len(lines), out.String())
+	}
+	if !strings.Contains(lines[0], `"protocolVersion"`) {
+		t.Fatalf("initialize resp = %s", lines[0])
+	}
+	if !strings.Contains(lines[2], "Use JWT") {
+		t.Fatalf("search resp = %s", lines[2])
+	}
+}

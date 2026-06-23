@@ -531,10 +531,10 @@ func (a *App) SetupClaudeCode(opts SetupOptions) ([]SetupAction, error) {
 	}
 	for _, act := range actions {
 		if err := os.MkdirAll(filepath.Dir(act.Path), 0o755); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("setup: mkdir %s: %w", filepath.Dir(act.Path), err)
 		}
 		if err := os.WriteFile(act.Path, []byte(act.Content), act.Mode); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("setup: write %s: %w", act.Path, err)
 		}
 	}
 	return actions, nil

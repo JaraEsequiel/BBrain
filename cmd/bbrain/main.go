@@ -384,7 +384,7 @@ func cmdSetup(args []string, stdout, stderr io.Writer) int {
 	if bh == "" {
 		bh = brainRoot()
 	}
-	a := app.New(brainRoot())
+	a := app.New(bh)
 	actions, err := a.SetupClaudeCode(app.SetupOptions{ProjectDir: *dir, BrainHome: bh, Model: *model, DryRun: *dry})
 	if err != nil {
 		fmt.Fprintf(stderr, "setup: %v\n", err)

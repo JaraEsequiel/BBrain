@@ -147,6 +147,9 @@ func (s *Store) ListFacts() ([]fact.Fact, error) {
 // Get loads a single fact by id. ok is false (with a nil error) when no .md with
 // that id exists under the brain's facts dir.
 func (s *Store) Get(id string) (fact.Fact, bool, error) {
+	if !fact.ValidID(id) {
+		return fact.Fact{}, false, fmt.Errorf("store: invalid fact id %q", id)
+	}
 	data, err := os.ReadFile(filepath.Join(s.Brain.FactsDir(), id+".md"))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -258,6 +261,9 @@ func hashParts(parts ...string) string {
 // Delete removes a fact's .md file. It returns (false, nil) when no such file
 // exists, so deleting an absent fact is a no-op rather than an error.
 func (s *Store) Delete(id string) (bool, error) {
+	if !fact.ValidID(id) {
+		return false, fmt.Errorf("store: invalid fact id %q", id)
+	}
 	if err := os.Remove(filepath.Join(s.Brain.FactsDir(), id+".md")); err != nil {
 		if os.IsNotExist(err) {
 			return false, nil

@@ -89,3 +89,21 @@ func TestMoveMissingSource(t *testing.T) {
 		t.Fatal("Move should error on missing source")
 	}
 }
+
+func TestMoveRefusesOverlappingDest(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	mustMkdir(t, filepath.Join(src, "raws"))
+	mustWrite(t, filepath.Join(src, "raws", "a.md"), "keep me")
+	// dest nested inside src must be refused, and src must be left intact.
+	if err := Move(src, filepath.Join(src, "archive")); err == nil {
+		t.Fatal("Move must refuse a destination nested inside the source")
+	}
+	if b, err := os.ReadFile(filepath.Join(src, "raws", "a.md")); err != nil || string(b) != "keep me" {
+		t.Fatalf("source brain damaged by a refused overlapping move: %q, %v", b, err)
+	}
+	// src nested inside dest must also be refused.
+	if err := Move(filepath.Join(src, "raws"), src); err == nil {
+		t.Fatal("Move must refuse when the source is nested inside the destination")
+	}
+}

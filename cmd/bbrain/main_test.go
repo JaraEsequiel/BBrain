@@ -376,8 +376,8 @@ func TestEndToEndVaultMove(t *testing.T) {
 		t.Fatalf("vault move output = %q", out.String())
 	}
 	// The old home is gone; the moved brain is searchable.
-	if _, err := os.Stat(filepath.Join(home, "raws")); !os.IsNotExist(err) {
-		t.Fatal("old brain still present after move")
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatal("old brain root still present after move")
 	}
 	t.Setenv("BBRAIN_HOME", dest)
 	out.Reset()

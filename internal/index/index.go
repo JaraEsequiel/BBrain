@@ -182,14 +182,20 @@ func (ix *Index) Neighbors(id string) ([]Neighbor, error) {
 }
 
 // Clear empties the index (used before a full reindex): both the FTS table and
-// the derived links table.
+// the derived links table, in a single transaction so the index is never left
+// half-cleared if the second delete fails.
 func (ix *Index) Clear() error {
+	tx, err := ix.db.Begin()
+	if err != nil {
+		return err
+	}
 	for _, stmt := range []string{`DELETE FROM facts_fts`, `DELETE FROM links`} {
-		if _, err := ix.db.Exec(stmt); err != nil {
+		if _, err := tx.Exec(stmt); err != nil {
+			tx.Rollback()
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // Result is one search hit.

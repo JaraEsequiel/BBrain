@@ -3,6 +3,7 @@ package wiki
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"bbrain/internal/fact"
@@ -26,10 +27,13 @@ type LintResult struct {
 var targetRE = regexp.MustCompile(`\[\[([^\[\]]+)\]\]`)
 
 // scanTargets returns the bare fact ids referenced as [[id]] in s.
+// Each id is returned at most once (order of first occurrence preserved).
 func scanTargets(s string) []string {
 	var out []string
+	seen := map[string]bool{}
 	for _, m := range targetRE.FindAllString(s, -1) {
-		if id := fact.LinkTargetID(m); id != "" {
+		if id := fact.LinkTargetID(m); id != "" && !seen[id] {
+			seen[id] = true
 			out = append(out, id)
 		}
 	}
@@ -110,7 +114,11 @@ func Lint(wikiDir string, facts []fact.Fact, validCategories map[string]bool) ([
 				}
 			}
 		}
-		for _, dst := range scanTargets(pg.Content) {
+		pageBody := pg.Content
+		if i := strings.Index(pageBody, "\n---\n"); i >= 0 {
+			pageBody = pageBody[i+len("\n---\n"):]
+		}
+		for _, dst := range scanTargets(pageBody) {
 			if _, ok := byID[dst]; !ok {
 				issues = append(issues, Issue{Kind: "dangling-ref", Location: pg.RelPath,
 					Message: fmt.Sprintf("page %s references missing fact [[%s]]", pg.RelPath, dst)})

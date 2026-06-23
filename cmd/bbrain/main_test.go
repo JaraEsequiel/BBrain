@@ -193,8 +193,8 @@ func TestEndToEndWikiLink(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "agent.sh")
 	body := "#!/bin/sh\n" +
 		"in=$(cat)\n" +
-		"src=$(printf '%s\\n' \"$in\" | awk '/^## Source fact$/{f=1;next} f&&/^### /{print $2; exit}')\n" +
-		"dst=$(printf '%s\\n' \"$in\" | awk '/^## Candidate facts$/{f=1;next} f&&/^### /{print $2; exit}')\n" +
+		"src=$(printf '%s\\n' \"$in\" | awk '/^## Source fact$/{f=1;next} f&&/^### /{sub(/^### /,\"\"); print; exit}')\n" +
+		"dst=$(printf '%s\\n' \"$in\" | awk '/^## Candidate facts$/{f=1;next} f&&/^### /{sub(/^### /,\"\"); print; exit}')\n" +
 		"if [ \"$src\" = \"" + srcID + "\" ] && [ -n \"$dst\" ]; then\n" +
 		"  printf '{\"links\":[{\"dst\":\"%s\",\"relation\":\"relates\",\"why\":\"both jwt\"}]}' \"$dst\"\n" +
 		"else\n" +

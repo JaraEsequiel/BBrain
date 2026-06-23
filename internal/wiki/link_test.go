@@ -89,7 +89,7 @@ func TestLinkLoopSkipsFactsWithNoCandidatesAndValidates(t *testing.T) {
 	if len(out) != 1 || out[0].Src != "f-src" || len(out[0].Links) != 1 || out[0].Links[0].Dst != "f-cand" {
 		t.Fatalf("proposals = %+v", out)
 	}
-	if fr.calls != 2 { // f-src and f-cand were called; f-lonely was skipped
+	if fr.calls != 2 { // f-src and f-cand had candidates and were called; f-lonely had none and was skipped
 		t.Fatalf("runner calls = %d, want 2", fr.calls)
 	}
 }

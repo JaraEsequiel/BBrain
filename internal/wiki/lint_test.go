@@ -95,3 +95,17 @@ func TestLintClean(t *testing.T) {
 		t.Fatalf("expected no issues, got:\n%+v", issues)
 	}
 }
+
+func TestLintDetectsBadPage(t *testing.T) {
+	dir := t.TempDir()
+	facts := []fact.Fact{{ID: "f1", Title: "F1", Body: "b"}}
+	p := filepath.Join(dir, "global", "people", "broken.md")
+	must(t, os.MkdirAll(filepath.Dir(p), 0o755))
+	// opening delimiter but no closing one -> ParsePageMeta fails -> bad-page
+	must(t, os.WriteFile(p, []byte("---\ntitle: T\nno closing delimiter\n"), 0o644))
+	issues, err := Lint(dir, facts, map[string]bool{"people": true})
+	must(t, err)
+	if !hasIssue(issues, "bad-page", "broken.md") {
+		t.Fatalf("missing bad-page issue:\n%+v", issues)
+	}
+}

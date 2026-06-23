@@ -87,3 +87,87 @@ func TestSaveDedupesIdenticalWithinWindow(t *testing.T) {
 		t.Fatalf("dedup failed: got %d facts, want 1", len(facts))
 	}
 }
+
+func TestGetReturnsFactOrNotFound(t *testing.T) {
+	s := newTestStore(t)
+	if _, ok, err := s.Get("nope"); err != nil || ok {
+		t.Fatalf("Get(missing) = ok=%v err=%v, want ok=false err=nil", ok, err)
+	}
+	f, _ := s.Save(SaveInput{Type: "decision", Title: "Use JWT", Body: "b",
+		Project: "bbrain", Scope: "project"})
+	got, ok, err := s.Get(f.ID)
+	if err != nil || !ok {
+		t.Fatalf("Get(existing) ok=%v err=%v", ok, err)
+	}
+	if got.Title != "Use JWT" {
+		t.Fatalf("Get title = %q, want %q", got.Title, "Use JWT")
+	}
+}
+
+func TestAddLinkWritesReasonedWikilink(t *testing.T) {
+	s := newTestStore(t)
+	src, _ := s.Save(SaveInput{Type: "architecture", Title: "Auth model", Body: "jwt",
+		Project: "bbrain", Scope: "project"})
+	// Advance time so the second save is distinct (and not deduped).
+	s.Now = func() time.Time { return time.Date(2026, 6, 22, 13, 0, 0, 0, time.UTC) }
+	dst, _ := s.Save(SaveInput{Type: "decision", Title: "Session storage", Body: "redis",
+		Project: "bbrain", Scope: "project"})
+
+	updated, err := s.AddLink(src.ID, dst.ID, "depends-on", "auth model assumes the session storage")
+	if err != nil {
+		t.Fatalf("AddLink: %v", err)
+	}
+	if len(updated.Links) != 1 {
+		t.Fatalf("links = %+v, want 1", updated.Links)
+	}
+	l := updated.Links[0]
+	if l.Target != "[["+dst.ID+"]]" || l.Relation != "depends-on" || l.Why == "" {
+		t.Fatalf("link fields wrong: %+v", l)
+	}
+	// Persisted to disk, not just returned.
+	reloaded, ok, _ := s.Get(src.ID)
+	if !ok || len(reloaded.Links) != 1 || reloaded.Links[0].Relation != "depends-on" {
+		t.Fatalf("link not persisted: ok=%v links=%+v", ok, reloaded.Links)
+	}
+}
+
+func TestAddLinkUpsertsSameTarget(t *testing.T) {
+	s := newTestStore(t)
+	src, _ := s.Save(SaveInput{Type: "architecture", Title: "A", Body: "x", Project: "p", Scope: "project"})
+	s.Now = func() time.Time { return time.Date(2026, 6, 22, 13, 0, 0, 0, time.UTC) }
+	dst, _ := s.Save(SaveInput{Type: "decision", Title: "B", Body: "y", Project: "p", Scope: "project"})
+
+	if _, err := s.AddLink(src.ID, dst.ID, "relates", "first reason"); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := s.AddLink(src.ID, dst.ID, "conflicts-with", "second reason")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Links) != 1 {
+		t.Fatalf("re-linking the same target must not duplicate: %+v", updated.Links)
+	}
+	if updated.Links[0].Relation != "conflicts-with" || updated.Links[0].Why != "second reason" {
+		t.Fatalf("link not updated in place: %+v", updated.Links[0])
+	}
+}
+
+func TestAddLinkValidates(t *testing.T) {
+	s := newTestStore(t)
+	src, _ := s.Save(SaveInput{Type: "architecture", Title: "A", Body: "x", Project: "p", Scope: "project"})
+	s.Now = func() time.Time { return time.Date(2026, 6, 22, 13, 0, 0, 0, time.UTC) }
+	dst, _ := s.Save(SaveInput{Type: "decision", Title: "B", Body: "y", Project: "p", Scope: "project"})
+
+	if _, err := s.AddLink(src.ID, dst.ID, "bogus-relation", "why"); err == nil {
+		t.Fatal("AddLink should reject an invalid relation")
+	}
+	if _, err := s.AddLink(src.ID, dst.ID, "relates", ""); err == nil {
+		t.Fatal("AddLink should require a non-empty why")
+	}
+	if _, err := s.AddLink(src.ID, "missing-fact", "relates", "why"); err == nil {
+		t.Fatal("AddLink should reject a missing target fact")
+	}
+	if _, err := s.AddLink("missing-src", dst.ID, "relates", "why"); err == nil {
+		t.Fatal("AddLink should reject a missing source fact")
+	}
+}

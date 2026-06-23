@@ -16,6 +16,7 @@ import (
 	"bbrain/internal/llm"
 	"bbrain/internal/setup"
 	"bbrain/internal/store"
+	"bbrain/internal/vault"
 	"bbrain/internal/wiki"
 )
 
@@ -538,4 +539,37 @@ func (a *App) SetupClaudeCode(opts SetupOptions) ([]SetupAction, error) {
 		}
 	}
 	return actions, nil
+}
+
+// VaultMoveOptions configures App.VaultMove.
+type VaultMoveOptions struct {
+	ProjectDir string // optional: refresh this project's integration at the new home
+}
+
+// VaultMove relocates the brain to dest, rebuilds the index there, regenerates the
+// brain's env.sh to point at the moved adapter (when setup was run), and optionally
+// refreshes a project's integration. Returns the new root and the reindexed count.
+func (a *App) VaultMove(dest string, opts VaultMoveOptions) (string, int, error) {
+	if err := vault.Move(a.Brain.Root, dest); err != nil {
+		return "", 0, err
+	}
+	nb := New(dest)
+	indexed, err := nb.Reindex()
+	if err != nil {
+		return "", 0, err
+	}
+	// Point the brain's env.sh at the moved adapter, if setup was run before the move.
+	adapter := filepath.Join(dest, ".bbrain", "agents", "claude-code.sh")
+	if _, statErr := os.Stat(adapter); statErr == nil {
+		envPath := filepath.Join(dest, ".bbrain", "env.sh")
+		if err := os.WriteFile(envPath, []byte(setup.EnvExportLine(adapter)+"\n"), 0o644); err != nil {
+			return "", 0, err
+		}
+	}
+	if opts.ProjectDir != "" {
+		if _, err := nb.SetupClaudeCode(SetupOptions{ProjectDir: opts.ProjectDir, BrainHome: dest}); err != nil {
+			return "", 0, err
+		}
+	}
+	return dest, indexed, nil
 }

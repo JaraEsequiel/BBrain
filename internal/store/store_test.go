@@ -218,3 +218,29 @@ func TestAddLinkBumpsUpdatedAtNotRevisionCount(t *testing.T) {
 		t.Fatalf("persisted revision_count = %d, want %d", reloaded.RevisionCount, src.RevisionCount)
 	}
 }
+
+func TestRemoveLink(t *testing.T) {
+	s := newTestStore(t)
+	a, err := s.Save(SaveInput{Type: "decision", Title: "Alpha", Body: "a", Project: "p", Scope: "project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.Save(SaveInput{Type: "decision", Title: "Beta", Body: "b", Project: "p", Scope: "project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddLink(a.ID, b.ID, "relates", "x"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.RemoveLink(a.ID, b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Links) != 0 {
+		t.Fatalf("links after remove = %+v", got.Links)
+	}
+	// Removing a non-existent link is a no-op, not an error.
+	if _, err := s.RemoveLink(a.ID, "does-not-exist"); err != nil {
+		t.Fatalf("no-op remove errored: %v", err)
+	}
+}

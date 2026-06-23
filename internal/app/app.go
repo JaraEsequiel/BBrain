@@ -369,3 +369,76 @@ func (a *App) WikiLink(ctx context.Context, opts WikiLinkOptions) (wiki.LinkResu
 
 	return wiki.LinkResult{Written: written, Skipped: skipped, DryRun: opts.DryRun}, nil
 }
+
+// RemoveLink drops the reasoned wikilink from srcID to dstID on the source
+// fact's .md, then re-indexes that fact's edges.
+func (a *App) RemoveLink(srcID, dstID string) (fact.Fact, error) {
+	f, err := a.Store.RemoveLink(srcID, dstID)
+	if err != nil {
+		return fact.Fact{}, err
+	}
+	if err := a.ensureIndexDir(); err != nil {
+		return fact.Fact{}, err
+	}
+	ix, err := index.Open(a.Brain.IndexPath())
+	if err != nil {
+		return fact.Fact{}, err
+	}
+	defer ix.Close()
+	if err := ix.IndexLinks(f); err != nil {
+		return fact.Fact{}, err
+	}
+	return f, nil
+}
+
+// WikiLintOptions configures App.WikiLint.
+type WikiLintOptions struct {
+	Categories []string // extra categories merged into the default vocabulary
+	Fix        bool
+}
+
+// WikiLint runs the deterministic consistency checks over the whole brain. With
+// Fix, it drops dangling fact links (via RemoveLink) and always regenerates the
+// derived wiki/index.md; everything else is reported for the human to resolve.
+func (a *App) WikiLint(opts WikiLintOptions) (wiki.LintResult, error) {
+	facts, err := a.Store.ListFacts()
+	if err != nil {
+		return wiki.LintResult{}, err
+	}
+	valid := map[string]bool{}
+	for _, c := range wiki.DefaultCategories {
+		valid[c] = true
+	}
+	for _, c := range opts.Categories {
+		if c = strings.TrimSpace(c); c != "" {
+			valid[c] = true
+		}
+	}
+	issues, err := wiki.Lint(a.Brain.WikiDir(), facts, valid)
+	if err != nil {
+		return wiki.LintResult{}, err
+	}
+	if !opts.Fix {
+		return wiki.LintResult{Issues: issues}, nil
+	}
+
+	var remaining, fixed []wiki.Issue
+	for _, is := range issues {
+		if is.Kind == "dangling-link" && is.Fixable {
+			if _, err := a.RemoveLink(is.Src, is.Dst); err != nil {
+				return wiki.LintResult{}, err
+			}
+			fixed = append(fixed, is)
+			continue
+		}
+		remaining = append(remaining, is)
+	}
+	// The index is derived: always regenerate it on --fix.
+	if err := os.MkdirAll(a.Brain.WikiDir(), 0o755); err != nil {
+		return wiki.LintResult{}, err
+	}
+	if err := wiki.RegenerateIndex(a.Brain.WikiDir()); err != nil {
+		return wiki.LintResult{}, err
+	}
+	return wiki.LintResult{Issues: remaining, Fixed: fixed}, nil
+}

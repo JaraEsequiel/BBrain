@@ -71,3 +71,17 @@ Date: 2026-06-23 (Plan 5 merged as PR #5).
 - Security (verified with `sh -n` + safe `source`): malicious `--model` → no injection (falls back to default); a brain path containing a single quote → `env.sh` sources safely; an orphaned-marker CLAUDE.md → repaired to one block with user content preserved.
 
 Install flow for users: `bbrain setup claude-code` in a project, then `source <brain>/.bbrain/env.sh` for the wiki backend; Claude Code reads `.mcp.json` for the MCP tools.
+
+---
+
+## Capstone — full integrated system live with Claude Code (PASS)
+
+Date: 2026-06-23 (all 6 plans merged, PRs #1–#6).
+
+End-to-end, against the real `claude` CLI:
+1. MCP server `bbrain` ✔ Connected (latest binary).
+2. Claude Code invoked `mcp__bbrain__mem_search` → returned the exact fact title.
+3. The `setup`-generated adapter drove a live `wiki build` — Claude federated 2 facts into "GraphQL Gateway Architecture" (both sources, `[[fact-id]]` citations).
+4. **Relocate lifecycle:** `bbrain vault move` relocated the brain (reindexed) → re-registered the MCP server at the new home → ✔ Connected → Claude `mem_search` still found the fact at the relocated home.
+
+The complete BBrain ↔ Claude Code integration — memory CRUD over MCP, LLM-driven wiki distillation via the adapter, and safe relocation — is validated in runtime.

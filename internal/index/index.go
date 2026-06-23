@@ -240,27 +240,29 @@ func (ix *Index) search(match string, limit int) ([]Result, error) {
 	return out, rows.Err()
 }
 
-// buildMatch turns a raw user query into a safe FTS5 expression: each whitespace
-// token is wrapped in double quotes (with internal quotes doubled), so FTS5
-// special characters are treated as literals and tokens are AND-ed together.
-func buildMatch(q string) string {
+// quoteTokens splits q into whitespace-delimited tokens and wraps each in double
+// quotes, doubling any embedded quote so FTS5 treats every token as a literal
+// (neutralizing FTS special characters). A blank query yields an empty slice, so
+// strings.Join over the result returns "" — the empty match the search core
+// short-circuits on.
+func quoteTokens(q string) []string {
 	fields := strings.Fields(q)
 	quoted := make([]string, 0, len(fields))
 	for _, f := range fields {
 		f = strings.ReplaceAll(f, `"`, `""`)
 		quoted = append(quoted, `"`+f+`"`)
 	}
-	return strings.Join(quoted, " ")
+	return quoted
+}
+
+// buildMatch turns a raw user query into a safe FTS5 expression: each token is
+// quoted via quoteTokens, then AND-ed together.
+func buildMatch(q string) string {
+	return strings.Join(quoteTokens(q), " ")
 }
 
 // buildMatchAny is like buildMatch but OR-joins the quoted tokens, so a fact
 // matching any single term is returned.
 func buildMatchAny(q string) string {
-	fields := strings.Fields(q)
-	quoted := make([]string, 0, len(fields))
-	for _, f := range fields {
-		f = strings.ReplaceAll(f, `"`, `""`)
-		quoted = append(quoted, `"`+f+`"`)
-	}
-	return strings.Join(quoted, " OR ")
+	return strings.Join(quoteTokens(q), " OR ")
 }

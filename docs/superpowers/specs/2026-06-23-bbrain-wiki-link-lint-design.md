@@ -89,9 +89,10 @@ LinkResult{ Written []Edge; Skipped int; DryRun bool }   // Edge{Src, Dst, Relat
 ### 4.1 CLI
 
 ```
-bbrain wiki lint [--project P] [--scope S] [--categories a,b,c] [--fix]
+bbrain wiki lint [--categories a,b,c] [--fix]
 ```
 
+- **Whole-brain only — no `--project`/`--scope` filter.** Lint judges link/source existence against the *entire* fact set; filtering would make cross-project links falsely appear dangling. (Revised from the original draft, which listed these flags.)
 - No LLM; runs with `BBRAIN_AGENT_CLI` unset.
 - `--categories`: extra categories merged into the default vocabulary (same merge as `wiki build`) so a page using a custom category isn't falsely flagged.
 - `--fix`: apply the mechanically-safe repairs (§4.3).

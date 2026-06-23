@@ -3,6 +3,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,19 +12,22 @@ import (
 	"bbrain/internal/brain"
 	"bbrain/internal/fact"
 	"bbrain/internal/index"
+	"bbrain/internal/llm"
 	"bbrain/internal/store"
+	"bbrain/internal/wiki"
 )
 
 // App is the high-level façade over one brain.
 type App struct {
-	Store *store.Store
-	Brain brain.Brain
+	Store  *store.Store
+	Brain  brain.Brain
+	Runner llm.Runner
 }
 
 // New builds an App rooted at a brain directory.
 func New(root string) *App {
 	b := brain.New(root)
-	return &App{Store: store.New(b), Brain: b}
+	return &App{Store: store.New(b), Brain: b, Runner: llm.NewCLIRunner()}
 }
 
 // ensureIndexDir creates the directory that holds the derived index, so the
@@ -196,4 +200,55 @@ func (a *App) Candidates(id string, limit int) ([]index.Result, error) {
 		}
 	}
 	return out, nil
+}
+
+// WikiBuildOptions configures App.WikiBuild.
+type WikiBuildOptions struct {
+	Project    string
+	Scope      string
+	Categories []string // extra categories added to the default vocabulary
+	DryRun     bool
+}
+
+// WikiBuild runs the LLM-driven wiki build over the brain's facts (optionally
+// filtered by project/scope) and writes the distilled pages, index, and log.
+func (a *App) WikiBuild(ctx context.Context, opts WikiBuildOptions) (wiki.BuildResult, error) {
+	facts, err := a.Store.ListFacts()
+	if err != nil {
+		return wiki.BuildResult{}, err
+	}
+	var filtered []fact.Fact
+	for _, f := range facts {
+		if opts.Project != "" && f.Project != opts.Project {
+			continue
+		}
+		if opts.Scope != "" && f.Scope != opts.Scope {
+			continue
+		}
+		filtered = append(filtered, f)
+	}
+	if err := os.MkdirAll(a.Brain.WikiDir(), 0o755); err != nil {
+		return wiki.BuildResult{}, err
+	}
+
+	cats := append([]string{}, wiki.DefaultCategories...)
+	seen := map[string]bool{}
+	for _, c := range cats {
+		seen[c] = true
+	}
+	for _, c := range opts.Categories {
+		if c = strings.TrimSpace(c); c != "" && !seen[c] {
+			cats = append(cats, c)
+			seen[c] = true
+		}
+	}
+
+	return wiki.Build(ctx, wiki.BuildOptions{
+		WikiDir:    a.Brain.WikiDir(),
+		Facts:      filtered,
+		Categories: cats,
+		Runner:     a.Runner,
+		Now:        a.Store.Now,
+		DryRun:     opts.DryRun,
+	})
 }

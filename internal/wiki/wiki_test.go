@@ -2,6 +2,9 @@ package wiki
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -88,5 +91,64 @@ func TestValidatePage(t *testing.T) {
 		if err := ValidatePage(p, valid, byID); err == nil {
 			t.Fatalf("bad page %d accepted", i)
 		}
+	}
+}
+
+func writePage(t *testing.T, dir, rel, title, cat string, srcs int) {
+	t.Helper()
+	s := "---\ntitle: " + title + "\ncategory: " + cat + "\nsources:\n"
+	for i := 0; i < srcs; i++ {
+		s += "  - f" + strconv.Itoa(i) + "\n"
+	}
+	s += "generated_at: 2026-06-23T16:00:00Z\n---\n\n# " + title + "\n\nbody\n"
+	p := filepath.Join(dir, filepath.FromSlash(rel))
+	must(t, os.MkdirAll(filepath.Dir(p), 0o755))
+	must(t, os.WriteFile(p, []byte(s), 0o644))
+}
+
+func TestReadPagesSkipsReserved(t *testing.T) {
+	dir := t.TempDir()
+	writePage(t, dir, "projects/shopapp/decisions/auth.md", "Auth", "decisions", 1)
+	must(t, os.WriteFile(filepath.Join(dir, "index.md"), []byte("# Wiki Index\n"), 0o644))
+	must(t, os.WriteFile(filepath.Join(dir, "log.md"), []byte("# Wiki Log\n"), 0o644))
+	pages, err := readPages(dir)
+	must(t, err)
+	if len(pages) != 1 || pages[0].RelPath != "projects/shopapp/decisions/auth.md" {
+		t.Fatalf("pages = %+v", pages)
+	}
+}
+
+func TestReadPagesMissingDir(t *testing.T) {
+	pages, err := readPages(filepath.Join(t.TempDir(), "nope"))
+	if err != nil || pages != nil {
+		t.Fatalf("pages=%v err=%v, want nil,nil", pages, err)
+	}
+}
+
+func TestRegenerateIndex(t *testing.T) {
+	dir := t.TempDir()
+	writePage(t, dir, "projects/shopapp/decisions/auth.md", "Auth", "decisions", 1)
+	writePage(t, dir, "global/people/maria.md", "Maria", "people", 2)
+	must(t, RegenerateIndex(dir))
+	idx, _ := os.ReadFile(filepath.Join(dir, "index.md"))
+	s := string(idx)
+	if !strings.Contains(s, "## global") || !strings.Contains(s, "## projects/shopapp") {
+		t.Fatalf("index missing buckets:\n%s", s)
+	}
+	if !strings.Contains(s, "[Auth](projects/shopapp/decisions/auth.md) — decisions — 1 source") {
+		t.Fatalf("index missing auth line:\n%s", s)
+	}
+	if !strings.Contains(s, "— 2 sources") {
+		t.Fatalf("index plural wrong:\n%s", s)
+	}
+}
+
+func TestAppendLog(t *testing.T) {
+	dir := t.TempDir()
+	must(t, AppendLog(dir, "## entry1\n"))
+	must(t, AppendLog(dir, "## entry2\n"))
+	b, _ := os.ReadFile(filepath.Join(dir, "log.md"))
+	if got := string(b); got != "## entry1\n## entry2\n" {
+		t.Fatalf("log = %q", got)
 	}
 }

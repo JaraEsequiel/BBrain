@@ -254,3 +254,15 @@ func hashParts(parts ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(sum[:])
 }
+
+// Delete removes a fact's .md file. It returns (false, nil) when no such file
+// exists, so deleting an absent fact is a no-op rather than an error.
+func (s *Store) Delete(id string) (bool, error) {
+	if err := os.Remove(filepath.Join(s.Brain.FactsDir(), id+".md")); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}

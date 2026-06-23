@@ -181,6 +181,31 @@ func TestBuildMatchHelpers(t *testing.T) {
 	}
 }
 
+func TestDeleteFactRemovesFromSearchAndLinks(t *testing.T) {
+	ix, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ix.Close()
+	f := fact.Fact{ID: "f1", Title: "JWT auth", Body: "tokens", Links: []fact.Link{{Target: "[[f2]]", Relation: "relates", Why: "x"}}}
+	if err := ix.IndexFact(f, "p"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ix.IndexLinks(f); err != nil {
+		t.Fatal(err)
+	}
+	if err := ix.DeleteFact("f1"); err != nil {
+		t.Fatal(err)
+	}
+	res, _ := ix.Search("jwt", 10)
+	if len(res) != 0 {
+		t.Fatalf("search still returns deleted fact: %v", res)
+	}
+	if n, _ := ix.Neighbors("f2"); len(n) != 0 {
+		t.Fatalf("links survived delete: %v", n)
+	}
+}
+
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

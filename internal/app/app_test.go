@@ -336,3 +336,29 @@ func TestWikiLintReportsAndFixes(t *testing.T) {
 		t.Fatalf("link not dropped: %+v", got.Links)
 	}
 }
+
+func TestAppGetAndDelete(t *testing.T) {
+	a := New(t.TempDir())
+	must(t, a.Init())
+	f, err := a.Save(store.SaveInput{Type: "decision", Title: "JWT tokens", Body: "stateless", Project: "p", Scope: "project"})
+	must(t, err)
+	got, ok, err := a.Get(f.ID)
+	must(t, err)
+	if !ok || got.ID != f.ID {
+		t.Fatalf("Get = %+v, ok=%v", got, ok)
+	}
+	deleted, err := a.Delete(f.ID)
+	must(t, err)
+	if !deleted {
+		t.Fatal("Delete returned false")
+	}
+	if _, ok, _ := a.Get(f.ID); ok {
+		t.Fatal("Get still finds the fact after Delete")
+	}
+	// Index reflects the delete too.
+	res, err := a.Search("jwt", 10)
+	must(t, err)
+	if len(res) != 0 {
+		t.Fatalf("search returns deleted fact: %v", res)
+	}
+}

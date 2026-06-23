@@ -272,3 +272,20 @@ func buildMatch(q string) string {
 func buildMatchAny(q string) string {
 	return strings.Join(quoteTokens(q), " OR ")
 }
+
+// DeleteFact removes a fact's search row and its outgoing links from the index.
+func (ix *Index) DeleteFact(id string) error {
+	tx, err := ix.db.Begin()
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM facts_fts WHERE fact_id = ?`, id); err != nil {
+		tx.Rollback()
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM links WHERE src_id = ?`, id); err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}

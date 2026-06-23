@@ -68,6 +68,99 @@ func TestClearEmptiesIndex(t *testing.T) {
 	}
 }
 
+func TestIndexLinksAndWhy(t *testing.T) {
+	ix := openMem(t)
+	f := sampleFact("a", "Auth model", "body", "architecture", "p")
+	f.Links = []fact.Link{{Target: "[[b]]", Relation: "depends-on", Why: "needs b"}}
+	must(t, ix.IndexLinks(f))
+
+	edges, err := ix.Why("a", "b")
+	if err != nil {
+		t.Fatalf("Why: %v", err)
+	}
+	if len(edges) != 1 || edges[0].SrcID != "a" || edges[0].DstID != "b" ||
+		edges[0].Relation != "depends-on" || edges[0].Why != "needs b" {
+		t.Fatalf("Why(a,b) = %+v", edges)
+	}
+	// The reverse query returns the same edge (relation is symmetric for querying).
+	rev, err := ix.Why("b", "a")
+	if err != nil {
+		t.Fatalf("Why reverse: %v", err)
+	}
+	if len(rev) != 1 {
+		t.Fatalf("Why(b,a) = %+v, want 1", rev)
+	}
+}
+
+func TestNeighborsReturnsInAndOutEdges(t *testing.T) {
+	ix := openMem(t)
+	fa := sampleFact("a", "A", "x", "decision", "p")
+	fa.Links = []fact.Link{{Target: "[[b]]", Relation: "relates", Why: "r"}}
+	must(t, ix.IndexLinks(fa))
+	fc := sampleFact("c", "C", "z", "decision", "p")
+	fc.Links = []fact.Link{{Target: "[[a]]", Relation: "supersedes", Why: "s"}}
+	must(t, ix.IndexLinks(fc))
+
+	ns, err := ix.Neighbors("a")
+	if err != nil {
+		t.Fatalf("Neighbors: %v", err)
+	}
+	if len(ns) != 2 {
+		t.Fatalf("Neighbors(a) = %+v, want 2 (out to b, in from c)", ns)
+	}
+	var dirs = map[string]string{}
+	for _, n := range ns {
+		dirs[n.FactID] = n.Direction
+	}
+	if dirs["b"] != "out" || dirs["c"] != "in" {
+		t.Fatalf("directions wrong: %+v", dirs)
+	}
+}
+
+func TestIndexLinksIsUpsert(t *testing.T) {
+	ix := openMem(t)
+	f := sampleFact("a", "A", "x", "decision", "p")
+	f.Links = []fact.Link{{Target: "[[b]]", Relation: "relates", Why: "first"}}
+	must(t, ix.IndexLinks(f))
+	f.Links = []fact.Link{{Target: "[[b]]", Relation: "conflicts-with", Why: "second"}}
+	must(t, ix.IndexLinks(f))
+
+	edges, _ := ix.Why("a", "b")
+	if len(edges) != 1 || edges[0].Relation != "conflicts-with" || edges[0].Why != "second" {
+		t.Fatalf("re-indexing must replace edges: %+v", edges)
+	}
+}
+
+func TestClearAlsoEmptiesLinks(t *testing.T) {
+	ix := openMem(t)
+	f := sampleFact("a", "A", "x", "decision", "p")
+	f.Links = []fact.Link{{Target: "[[b]]", Relation: "relates", Why: "r"}}
+	must(t, ix.IndexLinks(f))
+	must(t, ix.Clear())
+	if edges, _ := ix.Why("a", "b"); len(edges) != 0 {
+		t.Fatalf("after Clear, Why = %+v, want empty", edges)
+	}
+}
+
+func TestSearchAnyMatchesAnyTerm(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("f1", "Use JWT for auth", "stateless tokens", "decision", "p"), "/x/f1.md"))
+	must(t, ix.IndexFact(sampleFact("f2", "Postgres choice", "relational database", "decision", "p"), "/x/f2.md"))
+
+	// AND search (Search) for two terms in different facts matches nothing.
+	if res, _ := ix.Search("jwt database", 10); len(res) != 0 {
+		t.Fatalf("Search(AND) = %+v, want 0", res)
+	}
+	// OR search (SearchAny) matches both.
+	res, err := ix.SearchAny("jwt database", 10)
+	if err != nil {
+		t.Fatalf("SearchAny: %v", err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("SearchAny = %+v, want 2", res)
+	}
+}
+
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

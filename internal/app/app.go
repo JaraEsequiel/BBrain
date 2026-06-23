@@ -447,3 +447,32 @@ func (a *App) WikiLint(opts WikiLintOptions) (wiki.LintResult, error) {
 	}
 	return wiki.LintResult{Issues: remaining, Fixed: fixed}, nil
 }
+
+// Get returns a fact by id (ok=false if absent).
+func (a *App) Get(id string) (fact.Fact, bool, error) {
+	return a.Store.Get(id)
+}
+
+// Delete removes a fact's .md and drops it from the derived index. Returns
+// (false, nil) if the fact did not exist.
+func (a *App) Delete(id string) (bool, error) {
+	deleted, err := a.Store.Delete(id)
+	if err != nil {
+		return false, err
+	}
+	if !deleted {
+		return false, nil
+	}
+	if err := a.ensureIndexDir(); err != nil {
+		return false, err
+	}
+	ix, err := index.Open(a.Brain.IndexPath())
+	if err != nil {
+		return false, err
+	}
+	defer ix.Close()
+	if err := ix.DeleteFact(id); err != nil {
+		return false, err
+	}
+	return true, nil
+}

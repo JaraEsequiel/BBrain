@@ -255,3 +255,22 @@ func TestRemoveLink(t *testing.T) {
 		t.Fatalf("no-op bumped updated_at: before=%q after=%q", before.UpdatedAt, got2.UpdatedAt)
 	}
 }
+
+func TestDelete(t *testing.T) {
+	s := newTestStore(t)
+	f, err := s.Save(SaveInput{Type: "decision", Title: "Doomed", Body: "x", Project: "p", Scope: "project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := s.Delete(f.ID)
+	if err != nil || !deleted {
+		t.Fatalf("Delete = %v, %v; want true, nil", deleted, err)
+	}
+	if _, ok, _ := s.Get(f.ID); ok {
+		t.Fatal("fact still present after Delete")
+	}
+	// Deleting an absent fact is a no-op, not an error.
+	if again, err := s.Delete(f.ID); err != nil || again {
+		t.Fatalf("second Delete = %v, %v; want false, nil", again, err)
+	}
+}

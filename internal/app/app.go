@@ -373,9 +373,12 @@ func (a *App) WikiLink(ctx context.Context, opts WikiLinkOptions) (wiki.LinkResu
 // RemoveLink drops the reasoned wikilink from srcID to dstID on the source
 // fact's .md, then re-indexes that fact's edges.
 func (a *App) RemoveLink(srcID, dstID string) (fact.Fact, error) {
-	f, err := a.Store.RemoveLink(srcID, dstID)
+	f, removed, err := a.Store.RemoveLink(srcID, dstID)
 	if err != nil {
 		return fact.Fact{}, err
+	}
+	if !removed {
+		return f, nil
 	}
 	if err := a.ensureIndexDir(); err != nil {
 		return fact.Fact{}, err
@@ -423,10 +426,12 @@ func (a *App) WikiLint(opts WikiLintOptions) (wiki.LintResult, error) {
 	}
 
 	var remaining, fixed []wiki.Issue
-	for _, is := range issues {
+	for i := 0; i < len(issues); i++ {
+		is := issues[i]
 		if is.Kind == "dangling-link" && is.Fixable {
 			if _, err := a.RemoveLink(is.Src, is.Dst); err != nil {
-				return wiki.LintResult{}, err
+				remaining = append(remaining, issues[i:]...)
+				return wiki.LintResult{Issues: remaining, Fixed: fixed}, err
 			}
 			fixed = append(fixed, is)
 			continue

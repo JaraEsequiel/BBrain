@@ -214,13 +214,13 @@ func (s *Store) AddLink(srcID, dstID, relation, why string) (fact.Fact, error) {
 // fact's .md. It is a no-op (returning the unchanged fact) when no such link
 // exists. The source .md is rewritten atomically and updated_at is bumped only
 // when a link was actually removed.
-func (s *Store) RemoveLink(srcID, dstID string) (fact.Fact, error) {
+func (s *Store) RemoveLink(srcID, dstID string) (fact.Fact, bool, error) {
 	src, ok, err := s.Get(srcID)
 	if err != nil {
-		return fact.Fact{}, err
+		return fact.Fact{}, false, err
 	}
 	if !ok {
-		return fact.Fact{}, fmt.Errorf("store: source fact %q not found", srcID)
+		return fact.Fact{}, false, fmt.Errorf("store: source fact %q not found", srcID)
 	}
 	kept := make([]fact.Link, 0, len(src.Links))
 	removed := false
@@ -232,14 +232,14 @@ func (s *Store) RemoveLink(srcID, dstID string) (fact.Fact, error) {
 		kept = append(kept, l)
 	}
 	if !removed {
-		return src, nil
+		return src, false, nil
 	}
 	src.Links = kept
 	src.UpdatedAt = s.Now().UTC().Format(time.RFC3339)
 	if err := s.write(src); err != nil {
-		return fact.Fact{}, err
+		return fact.Fact{}, false, err
 	}
-	return src, nil
+	return src, true, nil
 }
 
 func contentHash(in SaveInput) string {

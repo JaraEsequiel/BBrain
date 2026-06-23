@@ -232,15 +232,26 @@ func TestRemoveLink(t *testing.T) {
 	if _, err := s.AddLink(a.ID, b.ID, "relates", "x"); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.RemoveLink(a.ID, b.ID)
+	got, removed, err := s.RemoveLink(a.ID, b.ID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !removed {
+		t.Fatal("removed should be true after removing an existing link")
 	}
 	if len(got.Links) != 0 {
 		t.Fatalf("links after remove = %+v", got.Links)
 	}
 	// Removing a non-existent link is a no-op, not an error.
-	if _, err := s.RemoveLink(a.ID, "does-not-exist"); err != nil {
+	before, _, _ := s.Get(a.ID)
+	got2, removed2, err := s.RemoveLink(a.ID, "does-not-exist")
+	if err != nil {
 		t.Fatalf("no-op remove errored: %v", err)
+	}
+	if removed2 {
+		t.Fatal("removed2 should be false for a no-op")
+	}
+	if got2.UpdatedAt != before.UpdatedAt {
+		t.Fatalf("no-op bumped updated_at: before=%q after=%q", before.UpdatedAt, got2.UpdatedAt)
 	}
 }

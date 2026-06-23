@@ -166,3 +166,79 @@ func TestWikiBuildUnconfiguredFails(t *testing.T) {
 		t.Fatalf("err = %q", errOut.String())
 	}
 }
+
+func TestEndToEndWikiLink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("BBRAIN_HOME", home)
+	var out, errOut bytes.Buffer
+
+	if code := run([]string{"init"}, &out, &errOut); code != 0 {
+		t.Fatalf("init: %s", errOut.String())
+	}
+	save := func(title, body string) string {
+		out.Reset()
+		errOut.Reset()
+		if code := run([]string{"save", "--title", title, "--project", "shopapp", "--type", "decision", "--body", body}, &out, &errOut); code != 0 {
+			t.Fatalf("save: %s", errOut.String())
+		}
+		return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out.String()), "saved "))
+	}
+	srcID := save("JWT access tokens", "access token decision")
+	dstID := save("JWT refresh tokens", "refresh token decision")
+
+	// Fake agent: emits a link to the first candidate ONLY when the source-fact
+	// section is srcID, so the candidate fact's own prompt yields nothing (and we
+	// never produce a self-link). awk reads the ids robustly regardless of
+	// surrounding whitespace.
+	script := filepath.Join(t.TempDir(), "agent.sh")
+	body := "#!/bin/sh\n" +
+		"in=$(cat)\n" +
+		"src=$(printf '%s\\n' \"$in\" | awk '/^## Source fact$/{f=1;next} f&&/^### /{print $2; exit}')\n" +
+		"dst=$(printf '%s\\n' \"$in\" | awk '/^## Candidate facts$/{f=1;next} f&&/^### /{print $2; exit}')\n" +
+		"if [ \"$src\" = \"" + srcID + "\" ] && [ -n \"$dst\" ]; then\n" +
+		"  printf '{\"links\":[{\"dst\":\"%s\",\"relation\":\"relates\",\"why\":\"both jwt\"}]}' \"$dst\"\n" +
+		"else\n" +
+		"  printf '{\"links\":[]}'\n" +
+		"fi\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BBRAIN_AGENT_CLI", script)
+
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"wiki", "link"}, &out, &errOut); code != 0 {
+		t.Fatalf("wiki link: %s", errOut.String())
+	}
+	if !strings.Contains(out.String(), srcID) || !strings.Contains(out.String(), dstID) || !strings.Contains(out.String(), "relates") {
+		t.Fatalf("wiki link output = %q", out.String())
+	}
+	// The link landed on the source fact's .md.
+	b, err := os.ReadFile(filepath.Join(home, "raws", "facts", srcID+".md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), dstID) || !strings.Contains(string(b), "relation: relates") {
+		t.Fatalf("source fact .md = %s", b)
+	}
+}
+
+func TestWikiLinkUnconfiguredFails(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("BBRAIN_HOME", home)
+	t.Setenv("BBRAIN_AGENT_CLI", "")
+	var out, errOut bytes.Buffer
+	run([]string{"init"}, &out, &errOut)
+	// One fact with no candidates would skip the LLM; create two related facts so
+	// the runner is actually invoked and the unset-CLI error surfaces.
+	run([]string{"save", "--title", "JWT access", "--project", "p", "--type", "decision", "--body", "a"}, &out, &errOut)
+	run([]string{"save", "--title", "JWT refresh", "--project", "p", "--type", "decision", "--body", "b"}, &out, &errOut)
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"wiki", "link"}, &out, &errOut); code != 1 {
+		t.Fatalf("exit = %d, want 1", code)
+	}
+	if !strings.Contains(errOut.String(), "BBRAIN_AGENT_CLI") {
+		t.Fatalf("err = %q", errOut.String())
+	}
+}

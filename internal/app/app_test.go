@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -294,5 +296,43 @@ func TestWikiLinkIsIdempotent(t *testing.T) {
 	got, _, _ := a.Store.Get(src.ID)
 	if len(got.Links) != 1 {
 		t.Fatalf("idempotency broken: source links = %+v", got.Links)
+	}
+}
+
+func TestWikiLintReportsAndFixes(t *testing.T) {
+	a := New(t.TempDir())
+	must(t, a.Init())
+	x, err := a.Save(store.SaveInput{Type: "decision", Title: "Alpha", Body: "a", Project: "p", Scope: "project"})
+	must(t, err)
+	y, err := a.Save(store.SaveInput{Type: "decision", Title: "Beta", Body: "b", Project: "p", Scope: "project"})
+	must(t, err)
+	// A real link, then delete the target fact's .md so the link dangles.
+	if _, err := a.Link(x.ID, y.ID, "relates", "x"); err != nil {
+		t.Fatal(err)
+	}
+	must(t, os.Remove(filepath.Join(a.Brain.FactsDir(), y.ID+".md")))
+
+	// Report-only: the dangling link is reported and remains.
+	res, err := a.WikiLint(WikiLintOptions{})
+	must(t, err)
+	found := false
+	for _, is := range res.Issues {
+		if is.Kind == "dangling-link" && is.Src == x.ID && is.Dst == y.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("dangling-link not reported:\n%+v", res.Issues)
+	}
+
+	// --fix: the dangling link is dropped from the source fact.
+	res, err = a.WikiLint(WikiLintOptions{Fix: true})
+	must(t, err)
+	if len(res.Fixed) != 1 || res.Fixed[0].Kind != "dangling-link" {
+		t.Fatalf("fixed = %+v", res.Fixed)
+	}
+	got, _, _ := a.Store.Get(x.ID)
+	if len(got.Links) != 0 {
+		t.Fatalf("link not dropped: %+v", got.Links)
 	}
 }

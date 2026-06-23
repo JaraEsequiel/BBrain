@@ -234,6 +234,8 @@ func cmdWiki(args []string, stdout, stderr io.Writer) int {
 		return cmdWikiBuild(args[1:], stdout, stderr)
 	case "link":
 		return cmdWikiLink(args[1:], stdout, stderr)
+	case "lint":
+		return cmdWikiLint(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "wiki: unknown subcommand %q\n", args[0])
 		return 2
@@ -301,6 +303,40 @@ func cmdWikiLink(args []string, stdout, stderr io.Writer) int {
 	}
 	if res.Skipped > 0 {
 		fmt.Fprintf(stdout, "(skipped %d already-linked)\n", res.Skipped)
+	}
+	return 0
+}
+
+func cmdWikiLint(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("wiki lint", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	cats := fs.String("categories", "", "extra wiki categories (comma-separated)")
+	fix := fs.Bool("fix", false, "apply mechanically-safe repairs")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	var extra []string
+	if *cats != "" {
+		for _, c := range strings.Split(*cats, ",") {
+			if c = strings.TrimSpace(c); c != "" {
+				extra = append(extra, c)
+			}
+		}
+	}
+	a := app.New(brainRoot())
+	res, err := a.WikiLint(app.WikiLintOptions{Categories: extra, Fix: *fix})
+	if err != nil {
+		fmt.Fprintf(stderr, "wiki lint: %v\n", err)
+		return 1
+	}
+	for _, is := range res.Fixed {
+		fmt.Fprintf(stdout, "fixed: %s — %s\n", is.Kind, is.Message)
+	}
+	for _, is := range res.Issues {
+		fmt.Fprintf(stdout, "%s: %s — %s\n", is.Kind, is.Location, is.Message)
+	}
+	if len(res.Issues) > 0 {
+		return 1
 	}
 	return 0
 }

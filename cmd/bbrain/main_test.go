@@ -242,3 +242,58 @@ func TestWikiLinkUnconfiguredFails(t *testing.T) {
 		t.Fatalf("err = %q", errOut.String())
 	}
 }
+
+func TestEndToEndWikiLintFix(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("BBRAIN_HOME", home)
+	t.Setenv("BBRAIN_AGENT_CLI", "") // lint needs no agent
+	var out, errOut bytes.Buffer
+
+	if code := run([]string{"init"}, &out, &errOut); code != 0 {
+		t.Fatalf("init: %s", errOut.String())
+	}
+	save := func(title string) string {
+		out.Reset()
+		errOut.Reset()
+		if code := run([]string{"save", "--title", title, "--project", "p", "--type", "decision", "--body", "b"}, &out, &errOut); code != 0 {
+			t.Fatalf("save: %s", errOut.String())
+		}
+		return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out.String()), "saved "))
+	}
+	x := save("Alpha")
+	y := save("Beta")
+
+	// Link x -> y, then delete y's fact so the link dangles.
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"link", "--from", x, "--to", y, "--relation", "relates", "--why", "x"}, &out, &errOut); code != 0 {
+		t.Fatalf("link: %s", errOut.String())
+	}
+	if err := os.Remove(filepath.Join(home, "raws", "facts", y+".md")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Report-only: a dangling-link is reported and the command exits non-zero.
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"wiki", "lint"}, &out, &errOut); code != 1 {
+		t.Fatalf("wiki lint exit = %d, want 1; out=%q", code, out.String())
+	}
+	if !strings.Contains(out.String(), "dangling-link") {
+		t.Fatalf("lint report = %q", out.String())
+	}
+
+	// --fix: the dangling link is dropped and the command exits 0.
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"wiki", "lint", "--fix"}, &out, &errOut); code != 0 {
+		t.Fatalf("wiki lint --fix exit = %d, want 0; out=%q err=%q", code, out.String(), errOut.String())
+	}
+	b, err := os.ReadFile(filepath.Join(home, "raws", "facts", x+".md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), y) {
+		t.Fatalf("dangling link not dropped from source:\n%s", b)
+	}
+}

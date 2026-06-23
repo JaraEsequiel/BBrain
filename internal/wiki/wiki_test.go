@@ -1,12 +1,14 @@
 package wiki
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"bbrain/internal/fact"
 )
@@ -151,4 +153,111 @@ func TestAppendLog(t *testing.T) {
 	if got := string(b); got != "## entry1\n## entry2\n" {
 		t.Fatalf("log = %q", got)
 	}
+}
+
+type fakeRunner struct {
+	out       string
+	err       error
+	gotPrompt string
+}
+
+func (f *fakeRunner) Run(ctx context.Context, prompt string) (string, error) {
+	f.gotPrompt = prompt
+	return f.out, f.err
+}
+
+func fixedNow() time.Time { return time.Date(2026, 6, 23, 16, 0, 0, 0, time.UTC) }
+
+func TestBuildWritesPagesIndexLog(t *testing.T) {
+	dir := t.TempDir()
+	facts := []fact.Fact{
+		{ID: "2026-06-20-shopapp-jwt", Title: "JWT", Type: "decision", Project: "shopapp", Scope: "project", Body: "jwt"},
+		{ID: "2026-06-22-datacli-sqlite", Title: "SQLite", Type: "decision", Project: "datacli", Scope: "project", Body: "sqlite"},
+	}
+	fr := &fakeRunner{out: `{"pages":[
+		{"slug":"auth-model","category":"decisions","title":"Auth model","sources":["2026-06-20-shopapp-jwt"],"body":"# Auth model","change_reason":"created"},
+		{"slug":"data-store","category":"decisions","title":"Data store","sources":["2026-06-22-datacli-sqlite"],"body":"# Data store","change_reason":"created"}
+	]}`}
+	res, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Categories: DefaultCategories, Runner: fr, Now: fixedNow,
+	})
+	must(t, err)
+	if len(res.Written) != 2 {
+		t.Fatalf("written = %+v", res.Written)
+	}
+	for _, rel := range []string{"projects/shopapp/decisions/auth-model.md", "projects/datacli/decisions/data-store.md"} {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("missing page %s: %v", rel, err)
+		}
+	}
+	idx, _ := os.ReadFile(filepath.Join(dir, "index.md"))
+	if !strings.Contains(string(idx), "## projects/shopapp") {
+		t.Fatalf("index not regenerated:\n%s", idx)
+	}
+	logb, _ := os.ReadFile(filepath.Join(dir, "log.md"))
+	if !strings.Contains(string(logb), "wiki build") || !strings.Contains(string(logb), "auth-model.md") {
+		t.Fatalf("log not appended:\n%s", logb)
+	}
+}
+
+func TestBuildAbortsOnInvalidPage(t *testing.T) {
+	dir := t.TempDir()
+	facts := []fact.Fact{{ID: "f1", Title: "F", Project: "p", Scope: "project", Body: "b"}}
+	fr := &fakeRunner{out: `{"pages":[{"slug":"ok","category":"decisions","title":"T","sources":["nope"],"body":"b","change_reason":"x"}]}`}
+	if _, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Categories: DefaultCategories, Runner: fr, Now: fixedNow,
+	}); err == nil {
+		t.Fatal("Build should abort on unknown source")
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("Build wrote files despite invalid page: %v", entries)
+	}
+}
+
+func TestBuildReconciliationPassesExistingPageToPrompt(t *testing.T) {
+	dir := t.TempDir()
+	writePageRaw(t, dir, "projects/shopapp/decisions/auth-model.md",
+		"---\ntitle: Auth model\ncategory: decisions\nsources:\n  - f1\ngenerated_at: 2026-06-20T00:00:00Z\n---\n\nMANUAL EDIT KEEP THIS\n")
+	facts := []fact.Fact{{ID: "f1", Title: "JWT", Project: "shopapp", Scope: "project", Body: "jwt"}}
+	fr := &fakeRunner{out: `{"pages":[]}`}
+	_, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Categories: DefaultCategories, Runner: fr, Now: fixedNow,
+	})
+	must(t, err)
+	if !strings.Contains(fr.gotPrompt, "MANUAL EDIT KEEP THIS") {
+		t.Fatalf("existing page not passed to LLM for reconciliation:\n%s", fr.gotPrompt)
+	}
+}
+
+func TestBuildDryRunWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	facts := []fact.Fact{{ID: "f1", Title: "F", Project: "p", Scope: "project", Body: "b"}}
+	fr := &fakeRunner{out: `{"pages":[{"slug":"ok","category":"decisions","title":"T","sources":["f1"],"body":"b","change_reason":"x"}]}`}
+	res, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Categories: DefaultCategories, Runner: fr, Now: fixedNow, DryRun: true,
+	})
+	must(t, err)
+	if !res.DryRun || len(res.Written) != 1 {
+		t.Fatalf("dry-run result = %+v", res)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("dry-run wrote files: %v", entries)
+	}
+}
+
+func TestBuildPromptContainsFactsCategoriesAndSchema(t *testing.T) {
+	facts := []fact.Fact{{ID: "f1", Title: "JWT decision", Project: "shopapp", Scope: "project", Body: "jwt body"}}
+	p := BuildPrompt(facts, nil, DefaultCategories)
+	for _, want := range []string{"JWT decision", "jwt body", "decisions, concepts", "json", "[[fact-id]]"} {
+		if !strings.Contains(strings.ToLower(p), strings.ToLower(want)) {
+			t.Fatalf("prompt missing %q:\n%s", want, p)
+		}
+	}
+}
+
+func writePageRaw(t *testing.T, dir, rel, content string) {
+	t.Helper()
+	p := filepath.Join(dir, filepath.FromSlash(rel))
+	must(t, os.MkdirAll(filepath.Dir(p), 0o755))
+	must(t, os.WriteFile(p, []byte(content), 0o644))
 }

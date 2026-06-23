@@ -114,3 +114,30 @@ func Slug(title string) string {
 func NewID(date, title string) string {
 	return date + "-" + Slug(title)
 }
+
+// Relations is the controlled vocabulary for reasoned wikilink relations,
+// ported from engram. A link's relation must be one of these.
+var Relations = []string{"relates", "depends-on", "conflicts-with", "supersedes", "scoped", "compatible"}
+
+// ValidRelation reports whether r is one of the allowed relation types.
+func ValidRelation(r string) bool {
+	for _, x := range Relations {
+		if x == r {
+			return true
+		}
+	}
+	return false
+}
+
+// FormatTarget wraps a fact id as an on-disk wikilink target ("[[id]]").
+func FormatTarget(id string) string { return "[[" + id + "]]" }
+
+// LinkTargetID extracts the bare fact id from a wikilink target, stripping the
+// surrounding [[ ]] and any whitespace. A target that is already a bare slug is
+// returned unchanged.
+func LinkTargetID(target string) string {
+	t := strings.TrimSpace(target)
+	t = strings.TrimPrefix(t, "[[")
+	t = strings.TrimSuffix(t, "]]")
+	return strings.TrimSpace(t)
+}

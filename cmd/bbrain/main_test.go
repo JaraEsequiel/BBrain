@@ -355,6 +355,51 @@ func TestEndToEndWatchOnce(t *testing.T) {
 	}
 }
 
+func TestEndToEndVaultMove(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("BBRAIN_HOME", home)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"init"}, &out, &errOut); code != 0 {
+		t.Fatalf("init: %s", errOut.String())
+	}
+	if code := run([]string{"save", "--title", "Relocate me", "--project", "p", "--type", "decision", "--body", "jwt body"}, &out, &errOut); code != 0 {
+		t.Fatalf("save: %s", errOut.String())
+	}
+	dest := filepath.Join(t.TempDir(), "newhome")
+
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"vault", "move", dest}, &out, &errOut); code != 0 {
+		t.Fatalf("vault move: %s", errOut.String())
+	}
+	if !strings.Contains(out.String(), "moved brain to "+dest) {
+		t.Fatalf("vault move output = %q", out.String())
+	}
+	// The old home is gone; the moved brain is searchable.
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatal("old brain root still present after move")
+	}
+	t.Setenv("BBRAIN_HOME", dest)
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"search", "jwt"}, &out, &errOut); code != 0 {
+		t.Fatalf("search at dest: %s", errOut.String())
+	}
+	if !strings.Contains(out.String(), "Relocate me") {
+		t.Fatalf("search at moved brain = %q", out.String())
+	}
+}
+
+func TestVaultUsage(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := run([]string{"vault"}, &out, &errOut); code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+	if !strings.Contains(errOut.String(), "vault move") {
+		t.Fatalf("usage = %q", errOut.String())
+	}
+}
+
 func runStdin(t *testing.T, args []string, stdin string, out, errOut *bytes.Buffer) int {
 	t.Helper()
 	return runWithIn(args, strings.NewReader(stdin), out, errOut)

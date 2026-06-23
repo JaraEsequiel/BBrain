@@ -362,3 +362,58 @@ func TestAppGetAndDelete(t *testing.T) {
 		t.Fatalf("search returns deleted fact: %v", res)
 	}
 }
+
+func TestSetupClaudeCodeDryRunWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	a := New(t.TempDir())
+	must(t, a.Init())
+	actions, err := a.SetupClaudeCode(SetupOptions{ProjectDir: dir, BrainHome: a.Brain.Root, DryRun: true})
+	must(t, err)
+	if len(actions) != 4 {
+		t.Fatalf("want 4 actions, got %d", len(actions))
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("dry-run wrote files: %v", entries)
+	}
+}
+
+func TestSetupClaudeCodeWritesAndIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	a := New(home)
+	must(t, a.Init())
+	_, err := a.SetupClaudeCode(SetupOptions{ProjectDir: dir, BrainHome: home})
+	must(t, err)
+
+	// adapter executable
+	adapter := filepath.Join(home, ".bbrain", "agents", "claude-code.sh")
+	info, err := os.Stat(adapter)
+	must(t, err)
+	if info.Mode().Perm()&0o100 == 0 {
+		t.Fatalf("adapter not executable: %v", info.Mode())
+	}
+	// .mcp.json valid + has bbrain
+	mcp, err := os.ReadFile(filepath.Join(dir, ".mcp.json"))
+	must(t, err)
+	if !strings.Contains(string(mcp), `"bbrain"`) || !strings.Contains(string(mcp), `"BBRAIN_HOME"`) {
+		t.Fatalf(".mcp.json = %s", mcp)
+	}
+	// CLAUDE.md block
+	cm, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	must(t, err)
+	if !strings.Contains(string(cm), "BBRAIN:BEGIN") || !strings.Contains(string(cm), "mcp__bbrain__mem_save") {
+		t.Fatalf("CLAUDE.md = %s", cm)
+	}
+	// env.sh
+	if _, err := os.Stat(filepath.Join(home, ".bbrain", "env.sh")); err != nil {
+		t.Fatalf("env.sh missing: %v", err)
+	}
+
+	// idempotent: second run leaves exactly one managed block
+	_, err = a.SetupClaudeCode(SetupOptions{ProjectDir: dir, BrainHome: home})
+	must(t, err)
+	cm2, _ := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if strings.Count(string(cm2), "BBRAIN:BEGIN") != 1 {
+		t.Fatalf("duplicate managed block after re-run:\n%s", cm2)
+	}
+}

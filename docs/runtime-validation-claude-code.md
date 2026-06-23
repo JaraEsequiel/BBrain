@@ -46,3 +46,16 @@ wiki page already built from those facts then has `generated_at` < the fact's ne
 `updated_at`, so `wiki lint` correctly reports `stale-page`. Expected & correct —
 the intended order is build → link → (re)build, and `wiki lint` is the guardrail
 that surfaces the lag. Worth documenting in the eventual user guide.
+
+---
+
+## Plan 4 MCP server — live Claude Code validation (PASS)
+
+Date: 2026-06-23 (Plan 4 merged as PR #4).
+
+- Built `bbrain` to `~/.local/bin`; registered: `claude mcp add bbrain -e BBRAIN_HOME=<brain> -- bbrain mcp`.
+- `claude mcp get bbrain` → **✔ Connected** (initialize + tools/list handshake works with the real MCP client).
+- End-to-end tool call: piped a prompt to `claude -p --allowedTools "mcp__bbrain__mem_search"` asking it to search bbrain memories for "jwt"; Claude Code invoked the MCP tool and returned the exact seeded title **"Use JWT for shopapp auth"**.
+- Path-traversal guard verified live: `mem_delete {"id":"../../../victim"}` → `isError:true` ("invalid fact id"), target file untouched.
+
+The MCP tool names exposed to Claude Code are `mcp__bbrain__<tool>` (e.g. `mcp__bbrain__mem_search`). Plan 5 (`bbrain setup`) will productionize installation (PATH + a real brain + the agent adapter from Finding #1).

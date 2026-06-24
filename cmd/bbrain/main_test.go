@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -483,5 +484,21 @@ func TestEndToEndContext(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Context fact") {
 		t.Fatalf("context output = %q", out.String())
+	}
+}
+
+func TestPromptSubmitFirstMessage(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("BBRAIN_HOME", t.TempDir())
+	t.Setenv("BBRAIN_PROJECT", "P")
+
+	var out bytes.Buffer
+	in := strings.NewReader(`{"session_id":"cli-1","cwd":"/x/P"}`)
+	code := runWithIn([]string{"prompt-submit"}, in, &out, io.Discard)
+	if code != 0 {
+		t.Fatalf("exit code = %d; want 0", code)
+	}
+	if !strings.Contains(out.String(), "FIRST ACTION") {
+		t.Fatalf("want forced ToolSearch; got %q", out.String())
 	}
 }

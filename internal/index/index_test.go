@@ -62,9 +62,9 @@ func TestSearchQueryWithSpecialCharsDoesNotError(t *testing.T) {
 func TestClearEmptiesIndex(t *testing.T) {
 	ix := openMem(t)
 	must(t, ix.IndexFact(sampleFact("f1", "Use JWT", "body", "decision", "bbrain"), "/x/f1.md"))
-	must(t, ix.Clear())
+	must(t, ix.Reset())
 	if res, _ := ix.Search("jwt", 10); len(res) != 0 {
-		t.Fatalf("after Clear, Search = %+v, want empty", res)
+		t.Fatalf("after Reset, Search = %+v, want empty", res)
 	}
 }
 
@@ -136,9 +136,9 @@ func TestClearAlsoEmptiesLinks(t *testing.T) {
 	f := sampleFact("a", "A", "x", "decision", "p")
 	f.Links = []fact.Link{{Target: "[[b]]", Relation: "relates", Why: "r"}}
 	must(t, ix.IndexLinks(f))
-	must(t, ix.Clear())
+	must(t, ix.Reset())
 	if edges, _ := ix.Why("a", "b"); len(edges) != 0 {
-		t.Fatalf("after Clear, Why = %+v, want empty", edges)
+		t.Fatalf("after Reset, Why = %+v, want empty", edges)
 	}
 }
 
@@ -235,6 +235,29 @@ func TestLastSavedAt(t *testing.T) {
 	}
 	if _, ok, _ := ix.LastSavedAt("Nope"); ok {
 		t.Fatal("LastSavedAt(Nope) ok=true; want false")
+	}
+}
+
+func TestResetRecreatesSchema(t *testing.T) {
+	ix, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ix.Close()
+
+	if err := ix.IndexFact(fact.Fact{ID: "a", Project: "P", UpdatedAt: "2026-06-24T10:00:00Z"}, "a.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ix.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	// Reset clears all rows...
+	if _, ok, _ := ix.LastSavedAt("P"); ok {
+		t.Fatal("after Reset, expected no rows")
+	}
+	// ...and leaves a usable, current-schema table behind.
+	if err := ix.IndexFact(fact.Fact{ID: "b", Project: "P", UpdatedAt: "2026-06-24T11:00:00Z"}, "b.md"); err != nil {
+		t.Fatalf("IndexFact after Reset: %v", err)
 	}
 }
 

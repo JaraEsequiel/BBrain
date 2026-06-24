@@ -75,7 +75,7 @@ func TestUpsertManagedBlockInsertThenReplaceIdempotent(t *testing.T) {
 
 func TestClaudeMDBlockMentionsToolsAndMarkers(t *testing.T) {
 	b := ClaudeMDBlock("/b", "/adapter.sh")
-	for _, want := range []string{BlockBegin, BlockEnd, "mcp__bbrain__mem_save", "mcp__bbrain__wiki_build", "/adapter.sh", "ToolSearch"} {
+	for _, want := range []string{BlockBegin, BlockEnd, "mcp__bbrain__mem_save", "mcp__bbrain__wiki_build", "/adapter.sh", "ToolSearch", "SESSION CLOSE", "POST-COMPACTION"} {
 		if !strings.Contains(b, want) {
 			t.Fatalf("block missing %q:\n%s", want, b)
 		}
@@ -154,7 +154,7 @@ func TestSessionStartHookAndMerge(t *testing.T) {
 	}
 	// the hook command is bbrain context --home /v/memory
 	js, _ := json.Marshal(ss)
-	for _, want := range []string{`"bbrain"`, `"context"`, `"--home"`, `/v/memory`} {
+	for _, want := range []string{`"bbrain"`, `"context"`, `"--home"`, `/v/memory`, "compact", "clear"} {
 		if !strings.Contains(string(js), want) {
 			t.Fatalf("hook missing %q:\n%s", want, js)
 		}

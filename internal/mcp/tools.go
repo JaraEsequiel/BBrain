@@ -98,7 +98,15 @@ func handleMemSave(ctx context.Context, a *app.App, raw json.RawMessage) (any, e
 	if err != nil {
 		return nil, err
 	}
-	return factView(f), nil
+	view := factView(f)
+	// Lexical hint: surface existing similar, not-yet-linked facts so the agent can
+	// link/reconcile (mem_link conflicts-with/supersedes, or re-save with the same
+	// topic_key) instead of silently duplicating or contradicting. A hint failure
+	// must never fail the save, so the error is intentionally ignored.
+	if cands, cerr := a.Candidates(f.ID, 5); cerr == nil && len(cands) > 0 {
+		view["related"] = cands
+	}
+	return view, nil
 }
 
 func handleMemSearch(ctx context.Context, a *app.App, raw json.RawMessage) (any, error) {

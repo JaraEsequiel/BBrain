@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -249,11 +250,11 @@ func (s *Store) RemoveLink(srcID, dstID string) (fact.Fact, bool, error) {
 }
 
 func contentHash(in SaveInput) string {
-	return hashParts(in.Project, in.Scope, in.Type, in.Title, in.Body)
+	return hashParts(in.Project, in.Scope, in.Type, in.Title, in.Body, strconv.FormatBool(in.Pinned))
 }
 
 func contentHashOf(f fact.Fact) string {
-	return hashParts(f.Project, f.Scope, f.Type, f.Title, f.Body)
+	return hashParts(f.Project, f.Scope, f.Type, f.Title, f.Body, strconv.FormatBool(f.Pinned))
 }
 
 func hashParts(parts ...string) string {

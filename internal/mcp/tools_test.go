@@ -166,3 +166,33 @@ func TestHandleMemSavePinned(t *testing.T) {
 		t.Fatalf("pinned not persisted: found=%v fact=%+v", found, got)
 	}
 }
+
+func TestMemSaveSurfacesRelatedCandidates(t *testing.T) {
+	a := app.New(t.TempDir())
+
+	// Save fact A.
+	outA := call(t, a, "mem_save", `{"type":"decision","title":"Postgres connection pool tuning","body":"set max pool size to 20","project":"p"}`)
+	var ra map[string]any
+	if err := json.Unmarshal([]byte(outA), &ra); err != nil {
+		t.Fatalf("A response not JSON: %v\n%s", err, outA)
+	}
+	idA, _ := ra["id"].(string)
+	if idA == "" {
+		t.Fatalf("A has no id: %s", outA)
+	}
+
+	// Save fact B — lexically similar to A (shared distinctive terms).
+	outB := call(t, a, "mem_save", `{"type":"decision","title":"Postgres connection pool sizing","body":"reconsider the pool size","project":"p"}`)
+	if !strings.Contains(outB, `"related"`) {
+		t.Fatalf("B's save should surface related candidates:\n%s", outB)
+	}
+	if !strings.Contains(outB, idA) {
+		t.Fatalf("B's related should include A's id %q:\n%s", idA, outB)
+	}
+
+	// Save fact C — disjoint vocabulary → no related.
+	outC := call(t, a, "mem_save", `{"type":"decision","title":"Frontend teal palette","body":"pick teal accents","project":"p"}`)
+	if strings.Contains(outC, `"related"`) {
+		t.Fatalf("C is dissimilar; should have no related:\n%s", outC)
+	}
+}

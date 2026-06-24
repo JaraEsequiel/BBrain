@@ -437,3 +437,19 @@ func TestEndToEndMCP(t *testing.T) {
 		t.Fatalf("search resp = %s", lines[2])
 	}
 }
+
+func TestEndToEndContext(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("BBRAIN_HOME", home)
+	var out, errOut bytes.Buffer
+	run([]string{"init"}, &out, &errOut)
+	run([]string{"save", "--title", "Context fact", "--project", "p", "--type", "decision", "--body", "jwt"}, &out, &errOut)
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"context", "--home", home}, &out, &errOut); code != 0 {
+		t.Fatalf("context: %s", errOut.String())
+	}
+	if !strings.Contains(out.String(), "Context fact") {
+		t.Fatalf("context output = %q", out.String())
+	}
+}

@@ -120,3 +120,93 @@ func TestUpsertManagedBlockHalfOpenMarkers(t *testing.T) {
 		}
 	}
 }
+
+func TestDegradedClaudeMD(t *testing.T) {
+	s := DegradedClaudeMD("/vault/memory")
+	for _, want := range []string{"memory/raws/facts", "frontmatter", "[[fact-id]]", "/vault/memory", "wiki/index.md"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("degraded doc missing %q:\n%s", want, s)
+		}
+	}
+}
+
+func TestSessionStartHookAndMerge(t *testing.T) {
+	// merge into a settings.json that already has an unrelated hook + key
+	existing := []byte(`{"hooks":{"PreToolUse":[{"matcher":"Bash"}]},"env":{"X":"1"}}`)
+	out, err := MergeSettingsHook(existing, "/v/memory")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(out, &root); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, out)
+	}
+	hooks := root["hooks"].(map[string]any)
+	if _, ok := hooks["PreToolUse"]; !ok {
+		t.Fatal("merge dropped the unrelated PreToolUse hook")
+	}
+	if root["env"] == nil {
+		t.Fatal("merge dropped top-level env")
+	}
+	ss := hooks["SessionStart"].([]any)
+	if len(ss) != 1 {
+		t.Fatalf("want 1 SessionStart entry, got %d", len(ss))
+	}
+	// the hook command is bbrain context --home /v/memory
+	js, _ := json.Marshal(ss)
+	for _, want := range []string{`"bbrain"`, `"context"`, `"--home"`, `/v/memory`} {
+		if !strings.Contains(string(js), want) {
+			t.Fatalf("hook missing %q:\n%s", want, js)
+		}
+	}
+	// idempotent: merging again yields exactly one SessionStart entry
+	out2, _ := MergeSettingsHook(out, "/v/memory")
+	json.Unmarshal(out2, &root)
+	if n := len(root["hooks"].(map[string]any)["SessionStart"].([]any)); n != 1 {
+		t.Fatalf("merge not idempotent: %d SessionStart entries", n)
+	}
+	// removal strips ours, keeps the unrelated one
+	rem, err := RemoveSettingsHook(out2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	json.Unmarshal(rem, &root)
+	h := root["hooks"].(map[string]any)
+	if _, ok := h["SessionStart"]; ok {
+		t.Fatalf("RemoveSettingsHook left SessionStart:\n%s", rem)
+	}
+	if _, ok := h["PreToolUse"]; !ok {
+		t.Fatal("RemoveSettingsHook dropped the unrelated hook")
+	}
+}
+
+func TestRemoveMCPServer(t *testing.T) {
+	existing := []byte(`{"mcpServers":{"bbrain":{"type":"stdio"},"other":{"type":"stdio"}}}`)
+	out, err := RemoveMCPServer(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "bbrain") {
+		t.Fatalf("bbrain not removed:\n%s", out)
+	}
+	if !strings.Contains(string(out), "other") {
+		t.Fatalf("removal dropped the other server:\n%s", out)
+	}
+}
+
+func TestSkillsAndRemoveBlock(t *testing.T) {
+	if r := RecallSkill(); !strings.Contains(r, "description:") || !strings.Contains(r, "mcp__bbrain__mem_search") {
+		t.Fatalf("recall skill:\n%s", r)
+	}
+	if r := RememberSkill(); !strings.Contains(r, "mcp__bbrain__mem_save") {
+		t.Fatalf("remember skill:\n%s", r)
+	}
+	doc := "# Top\n\n" + ClaudeMDBlock("/m", "/a.sh") + "\n"
+	out := RemoveManagedBlock(doc)
+	if strings.Contains(out, BlockBegin) || strings.Contains(out, BlockEnd) {
+		t.Fatalf("managed block not removed:\n%s", out)
+	}
+	if !strings.Contains(out, "# Top") {
+		t.Fatalf("RemoveManagedBlock dropped user content:\n%s", out)
+	}
+}

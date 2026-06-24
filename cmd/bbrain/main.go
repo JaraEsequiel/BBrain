@@ -539,8 +539,14 @@ func cmdInstall(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "install: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "installed BBrain (%s scope). Memory vault: %s\n", o.Scope, filepath.Join(o.Vault, "memory"))
-	fmt.Fprintf(stdout, "wiki backend: source %s\n", filepath.Join(o.Vault, "memory", ".bbrain", "env.sh"))
+	mem := filepath.Join(o.Vault, "memory")
+	fmt.Fprintf(stdout, "installed BBrain (%s scope). Memory vault: %s\n", o.Scope, mem)
+	fmt.Fprintf(stdout, "wiki backend: source %s\n", filepath.Join(mem, ".bbrain", "env.sh"))
+	if n, err := app.New(mem).Reindex(); err != nil {
+		fmt.Fprintf(stderr, "install: reindex failed: %v — run 'bbrain reindex' to migrate the index\n", err)
+	} else {
+		fmt.Fprintf(stdout, "reindexed %d facts\n", n)
+	}
 	return 0
 }
 

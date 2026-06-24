@@ -365,6 +365,21 @@ func TestInstallDryRunWritesNothing(t *testing.T) {
 	}
 }
 
+func TestInstallReindexes(t *testing.T) {
+	proj := t.TempDir()
+	vault := filepath.Join(t.TempDir(), "vault")
+	t.Setenv("HOME", t.TempDir())
+	var out, errBuf bytes.Buffer
+	code := runWithIn([]string{"install", "--non-interactive", "--scope", "project", "--vault", vault, "--project", proj},
+		strings.NewReader(""), &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("install exit %d: %s", code, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "reindexed") {
+		t.Fatalf("install output missing 'reindexed': %q", out.String())
+	}
+}
+
 func TestSetupCommandRemoved(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := run([]string{"setup", "claude-code"}, &out, &errOut); code == 0 {

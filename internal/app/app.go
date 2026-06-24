@@ -589,29 +589,63 @@ func (a *App) Context(project string, limit int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var fs []fact.Fact
+
+	// visible: a fact passes the project filter when it is global (no project)
+	// or its project matches the requested one. Empty `project` shows everything.
+	visible := func(f fact.Fact) bool {
+		return project == "" || f.Project == "" || f.Project == project
+	}
+
+	// Pinned: full body, always-on, global-visible. Not bounded by `limit`.
+	var pinned []fact.Fact
+	pinnedID := map[string]bool{}
 	for _, f := range facts {
-		if project != "" && f.Project != project {
+		if f.Pinned && visible(f) {
+			pinned = append(pinned, f)
+			pinnedID[f.ID] = true
+		}
+	}
+	sort.Slice(pinned, func(i, j int) bool { return pinned[i].UpdatedAt > pinned[j].UpdatedAt })
+
+	// Recent: project-filtered bullets, excluding anything already pinned.
+	var recent []fact.Fact
+	for _, f := range facts {
+		if pinnedID[f.ID] || !visible(f) {
 			continue
 		}
-		fs = append(fs, f)
+		recent = append(recent, f)
 	}
-	sort.Slice(fs, func(i, j int) bool { return fs[i].UpdatedAt > fs[j].UpdatedAt })
-	if len(fs) > limit {
-		fs = fs[:limit]
+	sort.Slice(recent, func(i, j int) bool { return recent[i].UpdatedAt > recent[j].UpdatedAt })
+	if len(recent) > limit {
+		recent = recent[:limit]
 	}
+
 	var sb strings.Builder
 	sb.WriteString("# BBrain memory context\n")
+
+	if len(pinned) > 0 {
+		sb.WriteString("\n## About you & pinned context\n\n")
+		sb.WriteString("This is always-on context: who the user is, their preferences, and how to\n")
+		sb.WriteString("work with them. Keep it in mind throughout the session — it's background to\n")
+		sb.WriteString("factor into your work, not a task to act on.\n")
+		for _, f := range pinned {
+			sb.WriteString(fmt.Sprintf("\n### %s\n\n", f.Title))
+			sb.WriteString(strings.TrimRight(f.Body, "\n"))
+			sb.WriteString("\n")
+		}
+	}
+
 	if b, err := os.ReadFile(filepath.Join(a.Brain.WikiDir(), "index.md")); err == nil {
 		sb.WriteString("\n## Wiki index\n")
 		sb.Write(b)
 		sb.WriteString("\n")
 	}
+
 	sb.WriteString("\n## Recent facts\n")
-	if len(fs) == 0 {
+	if len(recent) == 0 {
 		sb.WriteString("(none yet)\n")
 	}
-	for _, f := range fs {
+	for _, f := range recent {
 		sb.WriteString(fmt.Sprintf("- [%s] %s (%s) — id %s\n", f.Type, f.Title, f.Project, f.ID))
 	}
 	return sb.String(), nil

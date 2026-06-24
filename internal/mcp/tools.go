@@ -35,7 +35,7 @@ func DefaultTools() []Tool {
 var (
 	schemaEmpty   = json.RawMessage(`{"type":"object"}`)
 	schemaID      = json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`)
-	schemaMemSave = json.RawMessage(`{"type":"object","properties":{"type":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},"project":{"type":"string"},"scope":{"type":"string"},"topic_key":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}}},"required":["type","title","body"]}`)
+	schemaMemSave = json.RawMessage(`{"type":"object","properties":{"type":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},"project":{"type":"string"},"scope":{"type":"string"},"topic_key":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"pinned":{"type":"boolean"}},"required":["type","title","body"]}`)
 	schemaMemSearch = json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}`)
 	schemaMemLink = json.RawMessage(`{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"relation":{"type":"string"},"why":{"type":"string"}},"required":["from","to","relation","why"]}`)
 	schemaMemWhy  = json.RawMessage(`{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"string"}},"required":["a","b"]}`)
@@ -53,6 +53,7 @@ func factView(f fact.Fact) map[string]any {
 		"title": f.Title, "body": f.Body, "tags": f.Tags,
 		"created_at": f.CreatedAt, "updated_at": f.UpdatedAt,
 		"revision_count": f.RevisionCount, "links": f.Links,
+		"pinned": f.Pinned,
 	}
 }
 
@@ -61,6 +62,7 @@ func factView(f fact.Fact) map[string]any {
 type memSaveArgs struct {
 	Type, Title, Body, Project, Scope, TopicKey string
 	Tags                                        []string
+	Pinned                                      bool
 }
 
 func (m *memSaveArgs) UnmarshalJSON(b []byte) error {
@@ -72,12 +74,14 @@ func (m *memSaveArgs) UnmarshalJSON(b []byte) error {
 		Scope    string   `json:"scope"`
 		TopicKey string   `json:"topic_key"`
 		Tags     []string `json:"tags"`
+		Pinned   bool     `json:"pinned"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
 	}
 	m.Type, m.Title, m.Body = raw.Type, raw.Title, raw.Body
 	m.Project, m.Scope, m.TopicKey, m.Tags = raw.Project, raw.Scope, raw.TopicKey, raw.Tags
+	m.Pinned = raw.Pinned
 	return nil
 }
 
@@ -89,6 +93,7 @@ func handleMemSave(ctx context.Context, a *app.App, raw json.RawMessage) (any, e
 	f, err := a.Save(store.SaveInput{
 		Type: in.Type, Title: in.Title, Body: in.Body,
 		Project: in.Project, Scope: in.Scope, TopicKey: in.TopicKey, Tags: in.Tags,
+		Pinned: in.Pinned,
 	})
 	if err != nil {
 		return nil, err

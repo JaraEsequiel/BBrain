@@ -205,16 +205,21 @@ func (ix *Index) Neighbors(id string) ([]Neighbor, error) {
 // repopulate via IndexFact. The index is derived from the .md files, so dropping
 // it loses nothing.
 func (ix *Index) Reset() error {
+	tx, err := ix.db.Begin()
+	if err != nil {
+		return err
+	}
 	for _, stmt := range []string{
 		`DROP TABLE IF EXISTS facts_fts`,
 		`DROP TABLE IF EXISTS links`,
 		schema, linksSchema,
 	} {
-		if _, err := ix.db.Exec(stmt); err != nil {
+		if _, err := tx.Exec(stmt); err != nil {
+			tx.Rollback()
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // Result is one search hit.

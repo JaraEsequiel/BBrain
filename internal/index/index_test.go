@@ -59,7 +59,7 @@ func TestSearchQueryWithSpecialCharsDoesNotError(t *testing.T) {
 	}
 }
 
-func TestClearEmptiesIndex(t *testing.T) {
+func TestResetEmptiesIndex(t *testing.T) {
 	ix := openMem(t)
 	must(t, ix.IndexFact(sampleFact("f1", "Use JWT", "body", "decision", "bbrain"), "/x/f1.md"))
 	must(t, ix.Reset())
@@ -131,7 +131,7 @@ func TestIndexLinksIsUpsert(t *testing.T) {
 	}
 }
 
-func TestClearAlsoEmptiesLinks(t *testing.T) {
+func TestResetAlsoEmptiesLinks(t *testing.T) {
 	ix := openMem(t)
 	f := sampleFact("a", "A", "x", "decision", "p")
 	f.Links = []fact.Link{{Target: "[[b]]", Relation: "relates", Why: "r"}}

@@ -2,7 +2,7 @@ package prompthook
 
 import (
 	"bytes"
-	"os"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +16,7 @@ func TestDetectProjectPrefersEnv(t *testing.T) {
 }
 
 func TestDetectProjectFromCwd(t *testing.T) {
-	os.Unsetenv("BBRAIN_PROJECT")
+	t.Setenv("BBRAIN_PROJECT", "")
 	if got := detectProject("/home/u/BBrain"); got != "BBrain" {
 		t.Fatalf("detectProject = %q; want BBrain", got)
 	}
@@ -46,5 +46,9 @@ func TestRunBadJSONIsSafe(t *testing.T) {
 	Run(strings.NewReader("not json"), &out, t.TempDir(), time.Now())
 	if strings.TrimSpace(out.String()) == "" {
 		t.Fatal("bad JSON must still emit valid JSON, not empty")
+	}
+	var v any
+	if err := json.Unmarshal(out.Bytes(), &v); err != nil {
+		t.Fatalf("Run must emit valid JSON, got %q: %v", out.String(), err)
 	}
 }

@@ -75,7 +75,7 @@ func TestUpsertManagedBlockInsertThenReplaceIdempotent(t *testing.T) {
 
 func TestClaudeMDBlockMentionsToolsAndMarkers(t *testing.T) {
 	b := ClaudeMDBlock("/b", "/adapter.sh")
-	for _, want := range []string{BlockBegin, BlockEnd, "mcp__bbrain__mem_save", "mcp__bbrain__wiki_build", "/adapter.sh"} {
+	for _, want := range []string{BlockBegin, BlockEnd, "mcp__bbrain__mem_save", "mcp__bbrain__wiki_build", "/adapter.sh", "ToolSearch"} {
 		if !strings.Contains(b, want) {
 			t.Fatalf("block missing %q:\n%s", want, b)
 		}
@@ -226,5 +226,48 @@ func TestRemoveSettingsHookNoHooksKeyReturnsCanonicalJSON(t *testing.T) {
 	// canonical (indented) output, not the raw input
 	if !strings.Contains(string(out), "\n  ") {
 		t.Fatalf("not canonical/indented JSON: %s", out)
+	}
+}
+
+func TestMergeSettingsInstallsBothHooks(t *testing.T) {
+	out, err := MergeSettingsHook(nil, "/mem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, want := range []string{"SessionStart", "UserPromptSubmit", "prompt-submit", "context"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("merged settings missing %q:\n%s", want, s)
+		}
+	}
+	// Idempotent: a second merge must not duplicate the UserPromptSubmit entry.
+	out2, err := MergeSettingsHook(out, "/mem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(out2), "prompt-submit"); n != 1 {
+		t.Fatalf("re-merge produced %d prompt-submit entries; want 1:\n%s", n, out2)
+	}
+	if n := strings.Count(string(out2), "context"); n != 1 {
+		t.Fatalf("re-merge produced %d context (SessionStart) entries; want 1:\n%s", n, out2)
+	}
+}
+
+func TestRemoveSettingsStripsBothHooksKeepsForeign(t *testing.T) {
+	seed := []byte(`{"hooks":{"UserPromptSubmit":[{"hooks":[{"command":"other","args":["keepme"]}]}]}}`)
+	merged, err := MergeSettingsHook(seed, "/mem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := RemoveSettingsHook(merged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if strings.Contains(s, "prompt-submit") || strings.Contains(s, `"context"`) {
+		t.Fatalf("remove left BBrain hooks:\n%s", s)
+	}
+	if !strings.Contains(s, "keepme") {
+		t.Fatalf("remove dropped a foreign hook:\n%s", s)
 	}
 }

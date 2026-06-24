@@ -151,6 +151,24 @@ Rule: when in doubt, search. A mem_search costs nothing. Starting without contex
 **Where**: files, people, or areas affected (omit if none)
 **Learned**: surprises, edge cases, or things to remember (omit if none)
 
+### SESSION CLOSE — before you say "done", if the session did real work (decisions, code, fixes, discoveries — not trivial chat or a single lookup):
+
+Call mem_save ONCE, type "session-summary", with a handoff:
+- Goal: what this session set out to do
+- Accomplished: what got done, with key details
+- Next steps: what's left for the next session
+- Relevant files: paths touched and why
+
+If nothing is worth handing off, skip it — do not save filler.
+
+### POST-COMPACTION — if you see a context compaction or reset, do this FIRST, in order, before continuing:
+
+1. mem_save the compacted summary as a session-summary fact (same fields as SESSION CLOSE) — preserve what was accomplished before the context was cut.
+2. mem_search with keywords from the user's current task to pull back the facts you just lost.
+3. Only THEN continue the user's request.
+
+Skipping these means working blind.
+
 The wiki LLM backend is $BBRAIN_AGENT_CLI -> ` + adapterPath + `. Workflow: build -> link -> rebuild; wiki_lint --fix for consistency.
 ` + BlockEnd
 }
@@ -197,7 +215,7 @@ timestamps, revision_count: 1). The derived index rebuilds when the CLI/MCP next
 // context by running "bbrain context --home <memoryDir>".
 func SessionStartHookEntry(memoryDir string) map[string]any {
 	return map[string]any{
-		"matcher": "startup|resume",
+		"matcher": "startup|resume|clear|compact",
 		"hooks": []map[string]any{
 			{"type": "command", "command": "bbrain", "args": []string{"context", "--home", memoryDir}, "timeout": 30},
 		},

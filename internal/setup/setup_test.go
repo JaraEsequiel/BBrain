@@ -75,7 +75,7 @@ func TestUpsertManagedBlockInsertThenReplaceIdempotent(t *testing.T) {
 
 func TestClaudeMDBlockMentionsToolsAndMarkers(t *testing.T) {
 	b := ClaudeMDBlock("/b", "/adapter.sh")
-	for _, want := range []string{BlockBegin, BlockEnd, "mcp__bbrain__mem_save", "mcp__bbrain__wiki_build", "/adapter.sh"} {
+	for _, want := range []string{BlockBegin, BlockEnd, "mcp__bbrain__mem_save", "mcp__bbrain__wiki_build", "/adapter.sh", "ToolSearch"} {
 		if !strings.Contains(b, want) {
 			t.Fatalf("block missing %q:\n%s", want, b)
 		}

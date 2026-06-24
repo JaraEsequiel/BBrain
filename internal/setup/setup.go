@@ -215,9 +215,10 @@ func RemoveSettingsHook(existing []byte) ([]byte, error) {
 	if err := json.Unmarshal(existing, &root); err != nil {
 		return nil, err
 	}
-	hooks, ok := root["hooks"].(map[string]any)
-	if !ok {
-		return existing, nil
+	hooks, _ := root["hooks"].(map[string]any)
+	if hooks == nil {
+		// No hooks to remove; still return canonical JSON for a consistent round-trip.
+		return json.MarshalIndent(root, "", "  ")
 	}
 	if arr, ok := hooks["SessionStart"].([]any); ok {
 		var kept []any

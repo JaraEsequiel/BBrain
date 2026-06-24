@@ -210,3 +210,21 @@ func TestSkillsAndRemoveBlock(t *testing.T) {
 		t.Fatalf("RemoveManagedBlock dropped user content:\n%s", out)
 	}
 }
+
+func TestRemoveSettingsHookNoHooksKeyReturnsCanonicalJSON(t *testing.T) {
+	out, err := RemoveSettingsHook([]byte(`{"env":{"X":"1"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(out, &root); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, out)
+	}
+	if root["env"] == nil {
+		t.Fatalf("dropped env: %s", out)
+	}
+	// canonical (indented) output, not the raw input
+	if !strings.Contains(string(out), "\n  ") {
+		t.Fatalf("not canonical/indented JSON: %s", out)
+	}
+}

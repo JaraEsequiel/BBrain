@@ -482,3 +482,38 @@ func TestVaultMoveRegeneratesEnvSh(t *testing.T) {
 		t.Fatalf("env.sh not regenerated to the new home %q:\n%s", newRoot, env)
 	}
 }
+
+func TestContextRecentFactsAndFilter(t *testing.T) {
+	a := New(t.TempDir())
+	must(t, a.Init())
+	if _, err := a.Save(store.SaveInput{Type: "decision", Title: "Alpha JWT", Body: "a", Project: "shopapp", Scope: "project"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Save(store.SaveInput{Type: "decision", Title: "Beta Redis", Body: "b", Project: "datacli", Scope: "project"}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := a.Context("", 10)
+	must(t, err)
+	if !strings.Contains(out, "Alpha JWT") || !strings.Contains(out, "Beta Redis") {
+		t.Fatalf("context = %s", out)
+	}
+	// project filter
+	filtered, err := a.Context("shopapp", 10)
+	must(t, err)
+	if !strings.Contains(filtered, "Alpha JWT") || strings.Contains(filtered, "Beta Redis") {
+		t.Fatalf("filtered context leaked: %s", filtered)
+	}
+}
+
+func TestContextEmptyBrain(t *testing.T) {
+	a := New(t.TempDir())
+	must(t, a.Init())
+	out, err := a.Context("", 10)
+	must(t, err)
+	if !strings.Contains(out, "BBrain memory context") {
+		t.Fatalf("empty context = %s", out)
+	}
+	if !strings.Contains(out, "(none yet)") {
+		t.Fatalf("empty context should say (none yet): %s", out)
+	}
+}

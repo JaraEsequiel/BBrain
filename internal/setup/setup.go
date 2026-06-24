@@ -114,3 +114,195 @@ func shellSingleQuote(s string) string {
 func EnvExportLine(adapterPath string) string {
 	return "export BBRAIN_AGENT_CLI=" + shellSingleQuote(adapterPath)
 }
+
+// DegradedClaudeMD is the L/CLAUDE.md placed at the vault root: it teaches a
+// session with NO bbrain MCP/CLI how to read and write the memory by hand.
+func DegradedClaudeMD(memoryDir string) string {
+	return `# BBrain memory (manual access)
+
+This folder is a BBrain memory vault. A session opened here WITHOUT the bbrain MCP
+server or CLI must read and write memory by hand with plain file tools. The memory
+lives at ` + memoryDir + `.
+
+## Layout
+- memory/raws/facts/<id>.md — one fact per file: YAML frontmatter, then "# Title", then a Markdown body.
+  Frontmatter: id (<YYYY-MM-DD>-<slug>), type, scope, project, tags, links (target/relation/why),
+  created_at, updated_at (RFC3339 UTC), revision_count. The body cites other facts as [[fact-id]].
+- memory/wiki/ — distilled pages; wiki/index.md is the catalog, wiki/log.md the history.
+
+## To recall
+Read memory/wiki/index.md first, then open the relevant memory/raws/facts/*.md.
+List titles with: grep -rh "^# " memory/raws/facts/
+
+## To remember
+Create memory/raws/facts/<date>-<kebab-title>.md with the frontmatter above (unique id, RFC3339 UTC
+timestamps, revision_count: 1). The derived index rebuilds when the CLI/MCP next runs.
+`
+}
+
+// SessionStartHookEntry is the Claude Code SessionStart hook that injects memory
+// context by running "bbrain context --home <memoryDir>".
+func SessionStartHookEntry(memoryDir string) map[string]any {
+	return map[string]any{
+		"matcher": "startup|resume",
+		"hooks": []map[string]any{
+			{"type": "command", "command": "bbrain", "args": []string{"context", "--home", memoryDir}, "timeout": 30},
+		},
+	}
+}
+
+// isBBrainHook reports whether a SessionStart entry is BBrain's (command "bbrain"
+// with "context" in its args), so merge/remove can target exactly it.
+func isBBrainHook(e any) bool {
+	m, ok := e.(map[string]any)
+	if !ok {
+		return false
+	}
+	hs, ok := m["hooks"].([]any)
+	if !ok {
+		return false
+	}
+	for _, h := range hs {
+		hm, ok := h.(map[string]any)
+		if !ok || hm["command"] != "bbrain" {
+			continue
+		}
+		if args, ok := hm["args"].([]any); ok {
+			for _, a := range args {
+				if a == "context" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// MergeSettingsHook inserts/replaces BBrain's SessionStart hook in a settings.json,
+// preserving every other hook and top-level key. Idempotent.
+func MergeSettingsHook(existing []byte, memoryDir string) ([]byte, error) {
+	root := map[string]any{}
+	if len(strings.TrimSpace(string(existing))) > 0 {
+		if err := json.Unmarshal(existing, &root); err != nil {
+			return nil, err
+		}
+	}
+	hooks, _ := root["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = map[string]any{}
+	}
+	var kept []any
+	if arr, ok := hooks["SessionStart"].([]any); ok {
+		for _, e := range arr {
+			if !isBBrainHook(e) {
+				kept = append(kept, e)
+			}
+		}
+	}
+	kept = append(kept, SessionStartHookEntry(memoryDir))
+	hooks["SessionStart"] = kept
+	root["hooks"] = hooks
+	return json.MarshalIndent(root, "", "  ")
+}
+
+// RemoveSettingsHook removes BBrain's SessionStart hook (and empties SessionStart/hooks
+// if nothing else remains), preserving all other content.
+func RemoveSettingsHook(existing []byte) ([]byte, error) {
+	if len(strings.TrimSpace(string(existing))) == 0 {
+		return existing, nil
+	}
+	root := map[string]any{}
+	if err := json.Unmarshal(existing, &root); err != nil {
+		return nil, err
+	}
+	hooks, _ := root["hooks"].(map[string]any)
+	if hooks == nil {
+		// No hooks to remove; still return canonical JSON for a consistent round-trip.
+		return json.MarshalIndent(root, "", "  ")
+	}
+	if arr, ok := hooks["SessionStart"].([]any); ok {
+		var kept []any
+		for _, e := range arr {
+			if !isBBrainHook(e) {
+				kept = append(kept, e)
+			}
+		}
+		if len(kept) == 0 {
+			delete(hooks, "SessionStart")
+		} else {
+			hooks["SessionStart"] = kept
+		}
+	}
+	if len(hooks) == 0 {
+		delete(root, "hooks")
+	} else {
+		root["hooks"] = hooks
+	}
+	return json.MarshalIndent(root, "", "  ")
+}
+
+// RemoveMCPServer drops the bbrain server from a .mcp.json, preserving others.
+func RemoveMCPServer(existing []byte) ([]byte, error) {
+	if len(strings.TrimSpace(string(existing))) == 0 {
+		return existing, nil
+	}
+	root := map[string]any{}
+	if err := json.Unmarshal(existing, &root); err != nil {
+		return nil, err
+	}
+	if servers, ok := root["mcpServers"].(map[string]any); ok {
+		delete(servers, "bbrain")
+		if len(servers) == 0 {
+			delete(root, "mcpServers")
+		} else {
+			root["mcpServers"] = servers
+		}
+	}
+	return json.MarshalIndent(root, "", "  ")
+}
+
+// RecallSkill is the /bbrain-recall SKILL.md body.
+func RecallSkill() string {
+	return `---
+description: Recall relevant memories from BBrain for the current task
+disable-model-invocation: false
+---
+
+# Recall (BBrain)
+
+Search BBrain memory for context relevant to the request, then summarize.
+
+1. Call mcp__bbrain__mem_search with a query from the user's request (use $ARGUMENTS if provided).
+2. For promising hits, call mcp__bbrain__mem_get to read the full fact.
+3. Summarize the relevant decisions and learnings, citing them by id.
+`
+}
+
+// RememberSkill is the /bbrain-remember SKILL.md body.
+func RememberSkill() string {
+	return `---
+description: Save a durable decision or learning to BBrain memory
+disable-model-invocation: false
+---
+
+# Remember (BBrain)
+
+Persist a durable fact to BBrain memory.
+
+Call mcp__bbrain__mem_save with:
+- title: a concise summary ($ARGUMENTS if the user provided the text)
+- body: details and rationale (Markdown; cite related facts as [[fact-id]])
+- type: one of decision|architecture|bugfix|pattern|config|discovery|learning
+- project and scope when known.
+`
+}
+
+// RemoveManagedBlock strips the BBrain managed block from doc (for uninstall).
+func RemoveManagedBlock(doc string) string {
+	start := strings.Index(doc, BlockBegin)
+	end := strings.Index(doc, BlockEnd)
+	if start >= 0 && end > start {
+		return strings.TrimLeft(doc[:start]+doc[end+len(BlockEnd):], "\n")
+	}
+	return doc
+}

@@ -206,6 +206,38 @@ func TestDeleteFactRemovesFromSearchAndLinks(t *testing.T) {
 	}
 }
 
+func TestLastSavedAt(t *testing.T) {
+	ix, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ix.Close()
+
+	mk := func(id, project, updated string) fact.Fact {
+		return fact.Fact{ID: id, Title: "t", Project: project, UpdatedAt: updated, CreatedAt: updated}
+	}
+	for _, f := range []fact.Fact{
+		mk("a", "BBrain", "2026-06-24T10:00:00Z"),
+		mk("b", "BBrain", "2026-06-24T12:00:00Z"),
+		mk("c", "Other", "2026-06-24T15:00:00Z"),
+	} {
+		if err := ix.IndexFact(f, f.ID+".md"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ts, ok, err := ix.LastSavedAt("BBrain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || ts != "2026-06-24T12:00:00Z" {
+		t.Fatalf("LastSavedAt(BBrain) = %q,%v; want 2026-06-24T12:00:00Z,true", ts, ok)
+	}
+	if _, ok, _ := ix.LastSavedAt("Nope"); ok {
+		t.Fatal("LastSavedAt(Nope) ok=true; want false")
+	}
+}
+
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

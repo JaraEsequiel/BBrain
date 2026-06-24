@@ -204,8 +204,18 @@ func SessionStartHookEntry(memoryDir string) map[string]any {
 	}
 }
 
-// isBBrainHook reports whether a SessionStart entry is BBrain's (command "bbrain"
-// with "context" in its args), so merge/remove can target exactly it.
+// UserPromptSubmitHookEntry is the Claude Code UserPromptSubmit hook that runs
+// "bbrain prompt-submit --home <memoryDir>" on every user message.
+func UserPromptSubmitHookEntry(memoryDir string) map[string]any {
+	return map[string]any{
+		"hooks": []map[string]any{
+			{"type": "command", "command": "bbrain", "args": []string{"prompt-submit", "--home", memoryDir}, "timeout": 10},
+		},
+	}
+}
+
+// isBBrainHook reports whether a hook entry is BBrain's (command "bbrain"
+// with "context" or "prompt-submit" in its args), so merge/remove can target exactly it.
 func isBBrainHook(e any) bool {
 	m, ok := e.(map[string]any)
 	if !ok {
@@ -222,7 +232,7 @@ func isBBrainHook(e any) bool {
 		}
 		if args, ok := hm["args"].([]any); ok {
 			for _, a := range args {
-				if a == "context" {
+				if a == "context" || a == "prompt-submit" {
 					return true
 				}
 			}
@@ -231,8 +241,8 @@ func isBBrainHook(e any) bool {
 	return false
 }
 
-// MergeSettingsHook inserts/replaces BBrain's SessionStart hook in a settings.json,
-// preserving every other hook and top-level key. Idempotent.
+// MergeSettingsHook inserts/replaces BBrain's SessionStart and UserPromptSubmit hooks
+// in a settings.json, preserving every other hook and top-level key. Idempotent.
 func MergeSettingsHook(existing []byte, memoryDir string) ([]byte, error) {
 	root := map[string]any{}
 	if len(strings.TrimSpace(string(existing))) > 0 {
@@ -244,22 +254,28 @@ func MergeSettingsHook(existing []byte, memoryDir string) ([]byte, error) {
 	if hooks == nil {
 		hooks = map[string]any{}
 	}
+	hooks["SessionStart"] = appendBBrainHook(hooks["SessionStart"], SessionStartHookEntry(memoryDir))
+	hooks["UserPromptSubmit"] = appendBBrainHook(hooks["UserPromptSubmit"], UserPromptSubmitHookEntry(memoryDir))
+	root["hooks"] = hooks
+	return json.MarshalIndent(root, "", "  ")
+}
+
+// appendBBrainHook strips any existing BBrain entry from a hook array and appends
+// entry, so re-running install never duplicates BBrain's hook.
+func appendBBrainHook(arr any, entry map[string]any) []any {
 	var kept []any
-	if arr, ok := hooks["SessionStart"].([]any); ok {
-		for _, e := range arr {
+	if a, ok := arr.([]any); ok {
+		for _, e := range a {
 			if !isBBrainHook(e) {
 				kept = append(kept, e)
 			}
 		}
 	}
-	kept = append(kept, SessionStartHookEntry(memoryDir))
-	hooks["SessionStart"] = kept
-	root["hooks"] = hooks
-	return json.MarshalIndent(root, "", "  ")
+	return append(kept, entry)
 }
 
-// RemoveSettingsHook removes BBrain's SessionStart hook (and empties SessionStart/hooks
-// if nothing else remains), preserving all other content.
+// RemoveSettingsHook removes BBrain's SessionStart and UserPromptSubmit hooks
+// (and empties their arrays/keys if nothing else remains), preserving all other content.
 func RemoveSettingsHook(existing []byte) ([]byte, error) {
 	if len(strings.TrimSpace(string(existing))) == 0 {
 		return existing, nil
@@ -273,7 +289,11 @@ func RemoveSettingsHook(existing []byte) ([]byte, error) {
 		// No hooks to remove; still return canonical JSON for a consistent round-trip.
 		return json.MarshalIndent(root, "", "  ")
 	}
-	if arr, ok := hooks["SessionStart"].([]any); ok {
+	for _, name := range []string{"SessionStart", "UserPromptSubmit"} {
+		arr, ok := hooks[name].([]any)
+		if !ok {
+			continue
+		}
 		var kept []any
 		for _, e := range arr {
 			if !isBBrainHook(e) {
@@ -281,9 +301,9 @@ func RemoveSettingsHook(existing []byte) ([]byte, error) {
 			}
 		}
 		if len(kept) == 0 {
-			delete(hooks, "SessionStart")
+			delete(hooks, name)
 		} else {
-			hooks["SessionStart"] = kept
+			hooks[name] = kept
 		}
 	}
 	if len(hooks) == 0 {

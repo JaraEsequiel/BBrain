@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "bbrain": {
+      "args": [
+        "mcp"
+      ],
+      "command": "bbrain",
+      "env": {
+        "BBRAIN_HOME": "/home/vex/.bbrain/default"
+      },
+      "type": "stdio"
+    }
+  }
+}

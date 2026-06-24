@@ -298,44 +298,70 @@ func TestEndToEndWikiLintFix(t *testing.T) {
 	}
 }
 
-func TestEndToEndSetupClaudeCode(t *testing.T) {
+func TestEndToEndInstallUninstallProject(t *testing.T) {
 	home := t.TempDir()
 	proj := t.TempDir()
-	t.Setenv("BBRAIN_HOME", home)
+	vault := filepath.Join(t.TempDir(), "vault")
+	t.Setenv("HOME", home)
 	var out, errOut bytes.Buffer
-	if code := run([]string{"init"}, &out, &errOut); code != 0 {
-		t.Fatalf("init: %s", errOut.String())
+
+	args := []string{"install", "--non-interactive", "--agent", "claude-code", "--scope", "project",
+		"--vault", vault, "--project", proj}
+	if code := run(args, &out, &errOut); code != 0 {
+		t.Fatalf("install: %s", errOut.String())
 	}
+	for _, p := range []string{
+		filepath.Join(vault, "memory", "raws", "facts"),
+		filepath.Join(vault, "CLAUDE.md"),
+		filepath.Join(proj, ".mcp.json"),
+		filepath.Join(proj, "CLAUDE.md"),
+		filepath.Join(proj, ".claude", "settings.json"),
+		filepath.Join(proj, ".claude", "skills", "bbrain-recall", "SKILL.md"),
+	} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("install did not create %s: %v", p, err)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(proj, ".mcp.json")); !strings.Contains(string(b), filepath.Join(vault, "memory")) {
+		t.Fatalf(".mcp.json BBRAIN_HOME wrong:\n%s", b)
+	}
+
+	// uninstall reverses (vault kept)
 	out.Reset()
 	errOut.Reset()
-	if code := run([]string{"setup", "claude-code", "--dir", proj, "--home", home}, &out, &errOut); code != 0 {
-		t.Fatalf("setup: %s", errOut.String())
+	uargs := []string{"uninstall", "--scope", "project", "--project", proj, "--vault", vault}
+	if code := run(uargs, &out, &errOut); code != 0 {
+		t.Fatalf("uninstall: %s", errOut.String())
 	}
-	if _, err := os.Stat(filepath.Join(proj, ".mcp.json")); err != nil {
-		t.Fatalf(".mcp.json not written: %v", err)
+	if b, _ := os.ReadFile(filepath.Join(proj, "CLAUDE.md")); strings.Contains(string(b), "BBRAIN:BEGIN") {
+		t.Fatal("uninstall left the managed block")
 	}
-	cm, _ := os.ReadFile(filepath.Join(proj, "CLAUDE.md"))
-	if !strings.Contains(string(cm), "mcp__bbrain__mem_save") {
-		t.Fatalf("CLAUDE.md = %s", cm)
+	if _, err := os.Stat(filepath.Join(vault, "memory")); err != nil {
+		t.Fatal("uninstall without --purge deleted the vault")
 	}
 }
 
-func TestSetupDryRunWritesNothing(t *testing.T) {
-	home := t.TempDir()
+func TestInstallDryRunWritesNothing(t *testing.T) {
 	proj := t.TempDir()
-	t.Setenv("BBRAIN_HOME", home)
+	vault := filepath.Join(t.TempDir(), "vault")
+	t.Setenv("HOME", t.TempDir())
 	var out, errOut bytes.Buffer
-	run([]string{"init"}, &out, &errOut)
-	out.Reset()
-	errOut.Reset()
-	if code := run([]string{"setup", "claude-code", "--dir", proj, "--home", home, "--dry-run"}, &out, &errOut); code != 0 {
-		t.Fatalf("setup --dry-run: %s", errOut.String())
+	args := []string{"install", "--non-interactive", "--scope", "project", "--vault", vault, "--project", proj, "--dry-run"}
+	if code := run(args, &out, &errOut); code != 0 {
+		t.Fatalf("install --dry-run: %s", errOut.String())
 	}
 	if !strings.Contains(out.String(), "[dry-run]") {
-		t.Fatalf("dry-run banner missing: %s", out.String())
+		t.Fatalf("missing dry-run banner: %s", out.String())
 	}
-	if entries, _ := os.ReadDir(proj); len(entries) != 0 {
-		t.Fatalf("dry-run wrote files: %v", entries)
+	if _, err := os.Stat(filepath.Join(proj, ".mcp.json")); !os.IsNotExist(err) {
+		t.Fatal("dry-run wrote .mcp.json")
+	}
+}
+
+func TestSetupCommandRemoved(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := run([]string{"setup", "claude-code"}, &out, &errOut); code == 0 {
+		t.Fatal("`setup` should be removed (non-zero exit expected)")
 	}
 }
 

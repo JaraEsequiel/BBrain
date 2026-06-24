@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -575,4 +576,43 @@ func (a *App) VaultMove(dest string, opts VaultMoveOptions) (string, int, error)
 		}
 	}
 	return absDest, indexed, nil
+}
+
+// Context emits a compact Markdown digest of the brain's memory for a session-start
+// hook: the wiki index (if present) plus the most-recent facts, optionally filtered
+// by project. limit<=0 means 10.
+func (a *App) Context(project string, limit int) (string, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	facts, err := a.Store.ListFacts()
+	if err != nil {
+		return "", err
+	}
+	var fs []fact.Fact
+	for _, f := range facts {
+		if project != "" && f.Project != project {
+			continue
+		}
+		fs = append(fs, f)
+	}
+	sort.Slice(fs, func(i, j int) bool { return fs[i].UpdatedAt > fs[j].UpdatedAt })
+	if len(fs) > limit {
+		fs = fs[:limit]
+	}
+	var sb strings.Builder
+	sb.WriteString("# BBrain memory context\n")
+	if b, err := os.ReadFile(filepath.Join(a.Brain.WikiDir(), "index.md")); err == nil {
+		sb.WriteString("\n## Wiki index\n")
+		sb.Write(b)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\n## Recent facts\n")
+	if len(fs) == 0 {
+		sb.WriteString("(none yet)\n")
+	}
+	for _, f := range fs {
+		sb.WriteString(fmt.Sprintf("- [%s] %s (%s) — id %s\n", f.Type, f.Title, f.Project, f.ID))
+	}
+	return sb.String(), nil
 }

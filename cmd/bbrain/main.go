@@ -87,6 +87,8 @@ func runWithIn(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdVault(args[1:], stdout, stderr)
 	case "mcp":
 		return cmdMCP(args[1:], stdin, stdout, stderr)
+	case "context":
+		return cmdContext(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 2
@@ -468,5 +470,28 @@ func cmdVault(args []string, stdout, stderr io.Writer) int {
 	if *project != "" {
 		fmt.Fprintf(stdout, "refreshed integration in %s\n", *project)
 	}
+	return 0
+}
+
+func cmdContext(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("context", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	home := fs.String("home", "", "brain home (default: resolved brain root)")
+	project := fs.String("project", "", "only include facts in this project")
+	limit := fs.Int("limit", 10, "max recent facts")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	root := *home
+	if root == "" {
+		root = brainRoot()
+	}
+	a := app.New(root)
+	out, err := a.Context(*project, *limit)
+	if err != nil {
+		fmt.Fprintf(stderr, "context: %v\n", err)
+		return 1
+	}
+	fmt.Fprint(stdout, out)
 	return 0
 }

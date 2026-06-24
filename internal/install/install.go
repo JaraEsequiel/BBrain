@@ -13,6 +13,7 @@ import (
 
 	"bbrain/internal/brain"
 	"bbrain/internal/setup"
+	"github.com/natefinch/atomic"
 )
 
 // Options is a resolved install/uninstall configuration.
@@ -54,12 +55,26 @@ func (o Options) skillsDir() string {
 
 // Action is one filesystem/CLI operation in a plan.
 type Action struct {
-	Kind    string   // mkbrain|write|merge-md|merge-mcp|merge-settings|mcp-cli|remove-md|remove-mcp|remove-settings|rmdir
-	Path    string   // target (empty for mcp-cli)
-	Summary string
-	Content string   // new full content (for write/merge; shown on dry-run)
-	Mode    os.FileMode
-	Argv    []string // for mcp-cli
+	Kind        string     // mkbrain|write|merge-md|merge-mcp|merge-settings|mcp-cli|remove-md|remove-mcp|remove-settings|rmdir
+	Path        string     // target (empty for mcp-cli)
+	Summary     string
+	Content     string     // new full content (for write/merge; shown on dry-run)
+	Mode        os.FileMode
+	Argv        []string   // for mcp-cli
+	IgnoreError bool       // for mcp-cli: don't fail the apply if the command errors
+}
+
+// readMaybe reads path, treating "not exist" as empty (nil) but propagating any
+// other error so an existing-but-unreadable file is never silently overwritten.
+func readMaybe(path string) ([]byte, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("install: read %s: %w", path, err)
+	}
+	return b, nil
 }
 
 // PlanInstall computes the ordered actions for opts (pure: reads existing files to
@@ -82,17 +97,26 @@ func PlanInstall(o Options) ([]Action, error) {
 
 	// 2. integration CLAUDE.md (managed block)
 	cmPath := o.claudeMDPath()
-	doc, _ := os.ReadFile(cmPath)
+	doc, err := readMaybe(cmPath)
+	if err != nil {
+		return nil, err
+	}
 	acts = append(acts, Action{Kind: "merge-md", Path: cmPath, Summary: "integration CLAUDE.md block",
 		Content: setup.UpsertManagedBlock(string(doc), setup.ClaudeMDBlock(mem, adapter)), Mode: 0o644})
 
 	// 3. MCP registration
 	if o.Scope == "user" {
-		acts = append(acts, Action{Kind: "mcp-cli", Summary: "register bbrain MCP (user scope)",
-			Argv: []string{"claude", "mcp", "add", "-s", "user", "bbrain", "-e", "BBRAIN_HOME=" + mem, "--", "bbrain", "mcp"}})
+		acts = append(acts,
+			Action{Kind: "mcp-cli", Summary: "drop any prior bbrain MCP (user)", IgnoreError: true,
+				Argv: []string{"claude", "mcp", "remove", "-s", "user", "bbrain"}},
+			Action{Kind: "mcp-cli", Summary: "register bbrain MCP (user scope)",
+				Argv: []string{"claude", "mcp", "add", "-s", "user", "bbrain", "-e", "BBRAIN_HOME=" + mem, "--", "bbrain", "mcp"}})
 	} else {
 		mcpPath := filepath.Join(o.ProjectDir, ".mcp.json")
-		existing, _ := os.ReadFile(mcpPath)
+		existing, err := readMaybe(mcpPath)
+		if err != nil {
+			return nil, err
+		}
 		merged, err := setup.MergeMCPConfig(existing, mem)
 		if err != nil {
 			return nil, err
@@ -103,7 +127,10 @@ func PlanInstall(o Options) ([]Action, error) {
 
 	// 4. SessionStart hook
 	setPath := o.settingsPath()
-	setBytes, _ := os.ReadFile(setPath)
+	setBytes, err := readMaybe(setPath)
+	if err != nil {
+		return nil, err
+	}
 	mergedSet, err := setup.MergeSettingsHook(setBytes, mem)
 	if err != nil {
 		return nil, err
@@ -125,8 +152,8 @@ func PlanInstall(o Options) ([]Action, error) {
 // PlanUninstall computes the reversal actions for opts.
 func PlanUninstall(o Options) ([]Action, error) {
 	var acts []Action
-	// integration CLAUDE.md: strip the managed block (if the file exists)
-	if doc, err := os.ReadFile(o.claudeMDPath()); err == nil {
+	// integration CLAUDE.md: strip the managed block (only if the file actually contains it)
+	if doc, err := os.ReadFile(o.claudeMDPath()); err == nil && strings.Contains(string(doc), setup.BlockBegin) {
 		acts = append(acts, Action{Kind: "remove-md", Path: o.claudeMDPath(), Summary: "remove integration CLAUDE.md block",
 			Content: setup.RemoveManagedBlock(string(doc))})
 	}
@@ -173,7 +200,7 @@ func Apply(actions []Action) error {
 			if err := brain.New(a.Path).Init(); err != nil {
 				return fmt.Errorf("install: init vault %s: %w", a.Path, err)
 			}
-		case "write", "merge-md", "merge-mcp", "merge-settings", "remove-md", "remove-mcp", "remove-settings":
+		case "write":
 			if err := os.MkdirAll(filepath.Dir(a.Path), 0o755); err != nil {
 				return err
 			}
@@ -184,12 +211,22 @@ func Apply(actions []Action) error {
 			if err := os.WriteFile(a.Path, []byte(a.Content), mode); err != nil {
 				return fmt.Errorf("install: write %s: %w", a.Path, err)
 			}
+		case "merge-md", "merge-mcp", "merge-settings", "remove-md", "remove-mcp", "remove-settings":
+			if err := os.MkdirAll(filepath.Dir(a.Path), 0o755); err != nil {
+				return err
+			}
+			if err := atomic.WriteFile(a.Path, strings.NewReader(a.Content)); err != nil {
+				return fmt.Errorf("install: write %s: %w", a.Path, err)
+			}
 		case "mcp-cli":
 			out, err := exec.Command(a.Argv[0], a.Argv[1:]...).CombinedOutput()
-			if err != nil {
+			if err != nil && !a.IgnoreError {
 				return fmt.Errorf("install: %v: %w (%s)", a.Argv, err, strings.TrimSpace(string(out)))
 			}
 		case "rmdir":
+			if clean := filepath.Clean(a.Path); clean == "" || clean == "/" || clean == "." {
+				return fmt.Errorf("install: refusing to remove unsafe path %q", a.Path)
+			}
 			if err := os.RemoveAll(a.Path); err != nil {
 				return err
 			}

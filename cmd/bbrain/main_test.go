@@ -356,6 +356,12 @@ func TestInstallDryRunWritesNothing(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(proj, ".mcp.json")); !os.IsNotExist(err) {
 		t.Fatal("dry-run wrote .mcp.json")
 	}
+	if _, err := os.Stat(filepath.Join(proj, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Fatal("dry-run wrote CLAUDE.md")
+	}
+	if _, err := os.Stat(filepath.Join(proj, ".claude")); !os.IsNotExist(err) {
+		t.Fatal("dry-run wrote .claude/")
+	}
 }
 
 func TestSetupCommandRemoved(t *testing.T) {

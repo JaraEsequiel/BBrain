@@ -30,7 +30,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
 	topic_key,
 	type UNINDEXED,
 	scope UNINDEXED,
-	project UNINDEXED
+	project UNINDEXED,
+	updated_at UNINDEXED,
+	created_at UNINDEXED
 );`
 
 // linksSchema is a plain (non-FTS) table mirroring each fact's reasoned wikilinks.
@@ -75,15 +77,32 @@ func (ix *Index) IndexFact(f fact.Fact, path string) error {
 		return err
 	}
 	if _, err := tx.Exec(
-		`INSERT INTO facts_fts (fact_id, path, title, body, tags, topic_key, type, scope, project)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO facts_fts (fact_id, path, title, body, tags, topic_key, type, scope, project, updated_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		f.ID, path, f.Title, f.Body, strings.Join(f.Tags, " "), f.TopicKey,
-		f.Type, f.Scope, f.Project,
+		f.Type, f.Scope, f.Project, f.UpdatedAt, f.CreatedAt,
 	); err != nil {
 		tx.Rollback()
 		return err
 	}
 	return tx.Commit()
+}
+
+// LastSavedAt returns the most recent updated_at among facts in project, and
+// whether any exist. The timestamp is the raw RFC3339 string stored on the
+// fact. project is matched exactly (a global/empty-project fact does not count).
+func (ix *Index) LastSavedAt(project string) (string, bool, error) {
+	var ts sql.NullString
+	err := ix.db.QueryRow(
+		`SELECT max(updated_at) FROM facts_fts WHERE project = ?`, project,
+	).Scan(&ts)
+	if err != nil {
+		return "", false, err
+	}
+	if !ts.Valid || ts.String == "" {
+		return "", false, nil
+	}
+	return ts.String, true, nil
 }
 
 // IndexLinks mirrors a fact's reasoned wikilinks into the links table: it removes
@@ -181,15 +200,20 @@ func (ix *Index) Neighbors(id string) ([]Neighbor, error) {
 	return out, rows.Err()
 }
 
-// Clear empties the index (used before a full reindex): both the FTS table and
-// the derived links table, in a single transaction so the index is never left
-// half-cleared if the second delete fails.
-func (ix *Index) Clear() error {
+// Reset drops and recreates the derived tables so a schema change in `schema`
+// takes effect. Unlike a row-wipe, this migrates the table definition; callers
+// repopulate via IndexFact. The index is derived from the .md files, so dropping
+// it loses nothing.
+func (ix *Index) Reset() error {
 	tx, err := ix.db.Begin()
 	if err != nil {
 		return err
 	}
-	for _, stmt := range []string{`DELETE FROM facts_fts`, `DELETE FROM links`} {
+	for _, stmt := range []string{
+		`DROP TABLE IF EXISTS facts_fts`,
+		`DROP TABLE IF EXISTS links`,
+		schema, linksSchema,
+	} {
 		if _, err := tx.Exec(stmt); err != nil {
 			tx.Rollback()
 			return err

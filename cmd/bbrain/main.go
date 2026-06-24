@@ -13,6 +13,7 @@ import (
 	"bbrain/internal/app"
 	"bbrain/internal/install"
 	"bbrain/internal/mcp"
+	"bbrain/internal/prompthook"
 	"bbrain/internal/store"
 	"bbrain/internal/watch"
 )
@@ -42,7 +43,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func runWithIn(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates|wiki|install|uninstall|context|watch|vault|mcp> [args]")
+		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates|wiki|install|uninstall|context|prompt-submit|watch|vault|mcp> [args]")
 		return 2
 	}
 	switch args[0] {
@@ -92,6 +93,8 @@ func runWithIn(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdMCP(args[1:], stdin, stdout, stderr)
 	case "context":
 		return cmdContext(args[1:], stdout, stderr)
+	case "prompt-submit":
+		return cmdPromptSubmit(args[1:], stdin, stdout)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 2
@@ -459,6 +462,23 @@ func cmdContext(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+func cmdPromptSubmit(args []string, stdin io.Reader, stdout io.Writer) int {
+	fs := flag.NewFlagSet("prompt-submit", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	home := fs.String("home", "", "brain home (default: resolved brain root)")
+	if err := fs.Parse(args); err != nil {
+		// Never block the message on a flag error: emit a no-op and exit 0.
+		io.WriteString(stdout, "{}")
+		return 0
+	}
+	root := *home
+	if root == "" {
+		root = brainRoot()
+	}
+	prompthook.Run(stdin, stdout, root, time.Now())
+	return 0
+}
+
 func defaultVault() string {
 	if h, err := os.UserHomeDir(); err == nil {
 		return filepath.Join(h, "bbrain")
@@ -519,8 +539,14 @@ func cmdInstall(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "install: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "installed BBrain (%s scope). Memory vault: %s\n", o.Scope, filepath.Join(o.Vault, "memory"))
-	fmt.Fprintf(stdout, "wiki backend: source %s\n", filepath.Join(o.Vault, "memory", ".bbrain", "env.sh"))
+	mem := filepath.Join(o.Vault, "memory")
+	fmt.Fprintf(stdout, "installed BBrain (%s scope). Memory vault: %s\n", o.Scope, mem)
+	fmt.Fprintf(stdout, "wiki backend: source %s\n", filepath.Join(mem, ".bbrain", "env.sh"))
+	if n, err := app.New(mem).Reindex(); err != nil {
+		fmt.Fprintf(stderr, "install: reindex failed: %v — run 'bbrain reindex' to migrate the index\n", err)
+	} else {
+		fmt.Fprintf(stdout, "reindexed %d facts\n", n)
+	}
 	return 0
 }
 

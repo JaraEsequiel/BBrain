@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -364,6 +365,21 @@ func TestInstallDryRunWritesNothing(t *testing.T) {
 	}
 }
 
+func TestInstallReindexes(t *testing.T) {
+	proj := t.TempDir()
+	vault := filepath.Join(t.TempDir(), "vault")
+	t.Setenv("HOME", t.TempDir())
+	var out, errBuf bytes.Buffer
+	code := runWithIn([]string{"install", "--non-interactive", "--scope", "project", "--vault", vault, "--project", proj},
+		strings.NewReader(""), &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("install exit %d: %s", code, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "reindexed") {
+		t.Fatalf("install output missing 'reindexed': %q", out.String())
+	}
+}
+
 func TestSetupCommandRemoved(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := run([]string{"setup", "claude-code"}, &out, &errOut); code == 0 {
@@ -483,5 +499,21 @@ func TestEndToEndContext(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Context fact") {
 		t.Fatalf("context output = %q", out.String())
+	}
+}
+
+func TestPromptSubmitFirstMessage(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("BBRAIN_HOME", t.TempDir())
+	t.Setenv("BBRAIN_PROJECT", "P")
+
+	var out bytes.Buffer
+	in := strings.NewReader(`{"session_id":"cli-1","cwd":"/x/P"}`)
+	code := runWithIn([]string{"prompt-submit"}, in, &out, io.Discard)
+	if code != 0 {
+		t.Fatalf("exit code = %d; want 0", code)
+	}
+	if !strings.Contains(out.String(), "FIRST ACTION") {
+		t.Fatalf("want forced ToolSearch; got %q", out.String())
 	}
 }

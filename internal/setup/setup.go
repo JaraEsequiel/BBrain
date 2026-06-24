@@ -87,17 +87,70 @@ func UpsertManagedBlock(doc, block string) string {
 	return doc + "\n\n" + block + "\n"
 }
 
-// ClaudeMDBlock is the managed CLAUDE.md section documenting BBrain's MCP tools.
+// ClaudeMDBlock is the managed CLAUDE.md section documenting BBrain's MCP tools
+// and the obligatory memory protocol the agent must follow.
 func ClaudeMDBlock(brainHome, adapterPath string) string {
 	return BlockBegin + `
-## BBrain memory
+## Obligatory Memory Protocol
 
-This project uses BBrain for durable memory (brain at ` + brainHome + `). The bbrain MCP server exposes:
-- mcp__bbrain__mem_save / mem_search / mem_get / mem_delete — save and recall facts.
-- mcp__bbrain__mem_link / mem_why / mem_related / mem_candidates — the reasoned graph.
+You have access to a persistent memory system. Using it is NOT optional — it is a core part of how you operate. Treat it as your long-term brain: learn everything, forget nothing, connect the dots proactively.
+
+Tools — the mcp__bbrain__* tools may be deferred (not directly callable until loaded). If a call fails because they are not loaded, first load them all with ONE ToolSearch, then use them directly. ToolSearch query:
+select:mcp__bbrain__mem_save,mcp__bbrain__mem_search,mcp__bbrain__mem_get,mcp__bbrain__mem_delete,mcp__bbrain__mem_link,mcp__bbrain__mem_why,mcp__bbrain__mem_related,mcp__bbrain__mem_candidates,mcp__bbrain__mem_current_project,mcp__bbrain__wiki_build,mcp__bbrain__wiki_link,mcp__bbrain__wiki_lint
+- mcp__bbrain__mem_save / mem_search / mem_get / mem_delete — save, recall, and manage facts.
+- mcp__bbrain__mem_link / mem_why / mem_related / mem_candidates — build the knowledge graph.
 - mcp__bbrain__wiki_build / wiki_link / wiki_lint — distil and maintain the wiki.
 
-Save durable decisions and learnings via mem_save; search with mem_search before answering.
+Brain location: ` + brainHome + `
+
+### SAVE — Call mem_save immediately, without being asked, after any of these:
+
+**Decisions & work**
+- Architecture, design, or technical decision made
+- Bug fixed — include root cause, not just the fix
+- Non-obvious discovery, gotcha, or unexpected behavior found
+- Pattern, convention, or naming approach established
+- Configuration or environment change made
+
+**The user — learn everything**
+- A person is mentioned: who they are, their role, their relationship to the user, any context given
+- A pain point surfaces: anything the user expresses as friction, frustration, or a recurring problem
+- A preference is stated or implied: tools, approaches, styles, ways of working ("I always...", "I hate when...", "I prefer...")
+- A goal or aspiration is mentioned, even in passing
+- A workflow is described: how the user does something, in what order, with what tools
+- A habit or pattern emerges from context
+- A project — personal, professional, or side — is mentioned or described
+- A constraint or hard limit is stated: time, budget, energy, scope
+- A decision about any domain of the user's life, not just code
+
+**Conversations & signals**
+- User confirms a recommendation ("let's do that", "sounds good", "agreed")
+- User rejects an approach or corrects the assistant ("no, better X", "I don't want Y")
+- A recurring topic appears for the second time — it matters, save it
+- A meeting, call, or interaction with someone is referenced with any outcome or context
+- The user expresses an opinion about anything — tools, people, processes, experiences
+
+Self-check after every response: "Did anything just happen that a perfect personal assistant would write down? If yes → mem_save NOW."
+
+### SEARCH — Call mem_search proactively, before responding, in any of these situations:
+
+- User's first message references any topic, person, project, or problem — search before responding
+- A person is mentioned — check what is already known about them
+- A tool, service, or technology is mentioned — check prior decisions and preferences
+- User asks for a recommendation — check stored preferences before answering
+- Task resembles something previously worked on — check for prior context and lessons learned
+- User seems frustrated — check if this exact friction has appeared before
+- User references the past in any way ("last time", "we did this before", "remember when")
+- Starting work on any project that has been mentioned before
+
+Rule: when in doubt, search. A mem_search costs nothing. Starting without context costs trust.
+
+### FORMAT for mem_save body:
+**What**: one sentence — what was done, said, or decided
+**Why**: motivation, context, or reason it matters
+**Where**: files, people, or areas affected (omit if none)
+**Learned**: surprises, edge cases, or things to remember (omit if none)
+
 The wiki LLM backend is $BBRAIN_AGENT_CLI -> ` + adapterPath + `. Workflow: build -> link -> rebuild; wiki_lint --fix for consistency.
 ` + BlockEnd
 }
@@ -151,8 +204,18 @@ func SessionStartHookEntry(memoryDir string) map[string]any {
 	}
 }
 
-// isBBrainHook reports whether a SessionStart entry is BBrain's (command "bbrain"
-// with "context" in its args), so merge/remove can target exactly it.
+// UserPromptSubmitHookEntry is the Claude Code UserPromptSubmit hook that runs
+// "bbrain prompt-submit --home <memoryDir>" on every user message.
+func UserPromptSubmitHookEntry(memoryDir string) map[string]any {
+	return map[string]any{
+		"hooks": []map[string]any{
+			{"type": "command", "command": "bbrain", "args": []string{"prompt-submit", "--home", memoryDir}, "timeout": 10},
+		},
+	}
+}
+
+// isBBrainHook reports whether a hook entry is BBrain's (command "bbrain"
+// with "context" or "prompt-submit" in its args), so merge/remove can target exactly it.
 func isBBrainHook(e any) bool {
 	m, ok := e.(map[string]any)
 	if !ok {
@@ -169,7 +232,7 @@ func isBBrainHook(e any) bool {
 		}
 		if args, ok := hm["args"].([]any); ok {
 			for _, a := range args {
-				if a == "context" {
+				if a == "context" || a == "prompt-submit" {
 					return true
 				}
 			}
@@ -178,8 +241,8 @@ func isBBrainHook(e any) bool {
 	return false
 }
 
-// MergeSettingsHook inserts/replaces BBrain's SessionStart hook in a settings.json,
-// preserving every other hook and top-level key. Idempotent.
+// MergeSettingsHook inserts/replaces BBrain's SessionStart and UserPromptSubmit hooks
+// in a settings.json, preserving every other hook and top-level key. Idempotent.
 func MergeSettingsHook(existing []byte, memoryDir string) ([]byte, error) {
 	root := map[string]any{}
 	if len(strings.TrimSpace(string(existing))) > 0 {
@@ -191,22 +254,28 @@ func MergeSettingsHook(existing []byte, memoryDir string) ([]byte, error) {
 	if hooks == nil {
 		hooks = map[string]any{}
 	}
+	hooks["SessionStart"] = appendBBrainHook(hooks["SessionStart"], SessionStartHookEntry(memoryDir))
+	hooks["UserPromptSubmit"] = appendBBrainHook(hooks["UserPromptSubmit"], UserPromptSubmitHookEntry(memoryDir))
+	root["hooks"] = hooks
+	return json.MarshalIndent(root, "", "  ")
+}
+
+// appendBBrainHook strips any existing BBrain entry from a hook array and appends
+// entry, so re-running install never duplicates BBrain's hook.
+func appendBBrainHook(arr any, entry map[string]any) []any {
 	var kept []any
-	if arr, ok := hooks["SessionStart"].([]any); ok {
-		for _, e := range arr {
+	if a, ok := arr.([]any); ok {
+		for _, e := range a {
 			if !isBBrainHook(e) {
 				kept = append(kept, e)
 			}
 		}
 	}
-	kept = append(kept, SessionStartHookEntry(memoryDir))
-	hooks["SessionStart"] = kept
-	root["hooks"] = hooks
-	return json.MarshalIndent(root, "", "  ")
+	return append(kept, entry)
 }
 
-// RemoveSettingsHook removes BBrain's SessionStart hook (and empties SessionStart/hooks
-// if nothing else remains), preserving all other content.
+// RemoveSettingsHook removes BBrain's SessionStart and UserPromptSubmit hooks
+// (and empties their arrays/keys if nothing else remains), preserving all other content.
 func RemoveSettingsHook(existing []byte) ([]byte, error) {
 	if len(strings.TrimSpace(string(existing))) == 0 {
 		return existing, nil
@@ -220,7 +289,11 @@ func RemoveSettingsHook(existing []byte) ([]byte, error) {
 		// No hooks to remove; still return canonical JSON for a consistent round-trip.
 		return json.MarshalIndent(root, "", "  ")
 	}
-	if arr, ok := hooks["SessionStart"].([]any); ok {
+	for _, name := range []string{"SessionStart", "UserPromptSubmit"} {
+		arr, ok := hooks[name].([]any)
+		if !ok {
+			continue
+		}
 		var kept []any
 		for _, e := range arr {
 			if !isBBrainHook(e) {
@@ -228,9 +301,9 @@ func RemoveSettingsHook(existing []byte) ([]byte, error) {
 			}
 		}
 		if len(kept) == 0 {
-			delete(hooks, "SessionStart")
+			delete(hooks, name)
 		} else {
-			hooks["SessionStart"] = kept
+			hooks[name] = kept
 		}
 	}
 	if len(hooks) == 0 {

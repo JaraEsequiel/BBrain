@@ -14,8 +14,8 @@ import (
 
 	"github.com/natefinch/atomic"
 
-	"bbrain/internal/brain"
-	"bbrain/internal/fact"
+	"github.com/JaraEsequiel/BBrain/internal/brain"
+	"github.com/JaraEsequiel/BBrain/internal/fact"
 )
 
 // dedupeWindow is how long an exact-duplicate save is folded into the existing

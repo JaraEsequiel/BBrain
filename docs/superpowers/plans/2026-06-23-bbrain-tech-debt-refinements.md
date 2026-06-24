@@ -12,7 +12,7 @@
 
 - **Module path:** `bbrain` (local module; all imports are `bbrain/internal/...`).
 - **Go version:** `go 1.25` in `go.mod`.
-- **Project root:** `/home/vex/Projects/BBrain/` (the `engram/` subdir is reference only — never import from it).
+- **Project root:** `BBrain/` (the `engram/` subdir is reference only — never import from it).
 - **No behavior change.** These are tech-debt refinements. The output of `buildMatch`/`buildMatchAny`, the post-condition of `Clear`, and the behavior of `AddLink` must be byte-for-byte identical before and after. Every existing test must stay green.
 - **`.md` is source of truth.** The `links` table and `facts_fts` remain derived and disposable.
 - **SQLite driver:** `modernc.org/sqlite`, registered driver name `"sqlite"`.
@@ -83,7 +83,7 @@ func TestBuildMatchHelpers(t *testing.T) {
 
 - [ ] **Step 2: Run the test against the CURRENT (un-refactored) code — it must already PASS**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/index/ -run TestBuildMatchHelpers -v`
+Run: `cd BBrain && go test ./internal/index/ -run TestBuildMatchHelpers -v`
 Expected: PASS. This proves the test captures the *current* contract before we touch the implementation. (This is a refactor safety net, not red→green.)
 
 - [ ] **Step 3: Add `quoteTokens` and rewrite the two builders**
@@ -150,18 +150,18 @@ func buildMatchAny(q string) string {
 
 - [ ] **Step 4: Run the index tests — all must still PASS**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/index/ -v`
+Run: `cd BBrain && go test ./internal/index/ -v`
 Expected: PASS — `TestBuildMatchHelpers` plus all pre-existing index tests (search, search-any, graph, clear). Identical output before and after proves the refactor preserved behavior.
 
 - [ ] **Step 5: Vet**
 
-Run: `cd /home/vex/Projects/BBrain && go vet ./internal/index/`
+Run: `cd BBrain && go vet ./internal/index/`
 Expected: no output.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/index/index.go internal/index/index_test.go
 git commit -m "refactor(index): extract quoteTokens helper shared by buildMatch/buildMatchAny"
 ```
@@ -184,7 +184,7 @@ git commit -m "refactor(index): extract quoteTokens helper shared by buildMatch/
 
 - [ ] **Step 1: Confirm the existing Clear tests pass before the change**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/index/ -run 'TestClear' -v`
+Run: `cd BBrain && go test ./internal/index/ -run 'TestClear' -v`
 Expected: PASS (`TestClearEmptiesIndex`, `TestClearAlsoEmptiesLinks`). Baseline before touching `Clear`.
 
 - [ ] **Step 2: Wrap `Clear`'s two deletes in a transaction**
@@ -227,18 +227,18 @@ func (ix *Index) Clear() error {
 
 - [ ] **Step 3: Run the index tests — all must still PASS**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/index/ -v`
+Run: `cd BBrain && go test ./internal/index/ -v`
 Expected: PASS — the Clear tests and every other index test, unchanged.
 
 - [ ] **Step 4: Vet**
 
-Run: `cd /home/vex/Projects/BBrain && go vet ./internal/index/`
+Run: `cd BBrain && go vet ./internal/index/`
 Expected: no output.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/index/index.go
 git commit -m "refactor(index): make Clear atomic via a single transaction"
 ```
@@ -312,23 +312,23 @@ func TestAddLinkBumpsUpdatedAtNotRevisionCount(t *testing.T) {
 
 - [ ] **Step 2: Run it against the CURRENT code — it must already PASS**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/store/ -run TestAddLinkBumpsUpdatedAtNotRevisionCount -v`
+Run: `cd BBrain && go test ./internal/store/ -run TestAddLinkBumpsUpdatedAtNotRevisionCount -v`
 Expected: PASS. The behavior already exists; this test documents and protects it. (If it FAILS, the implementation contradicts its own doc comment — stop and escalate rather than editing the test to match.)
 
 - [ ] **Step 3: Run the full store package**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/store/ -v`
+Run: `cd BBrain && go test ./internal/store/ -v`
 Expected: PASS — the new test plus all existing store tests.
 
 - [ ] **Step 4: Vet**
 
-Run: `cd /home/vex/Projects/BBrain && go vet ./internal/store/`
+Run: `cd BBrain && go vet ./internal/store/`
 Expected: no output.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/store/store_test.go
 git commit -m "test(store): lock AddLink updated_at bump + revision_count invariance"
 ```
@@ -339,7 +339,7 @@ git commit -m "test(store): lock AddLink updated_at bump + revision_count invari
 
 - [ ] **Run the whole suite uncached**
 
-Run: `cd /home/vex/Projects/BBrain && go test -count=1 ./...`
+Run: `cd BBrain && go test -count=1 ./...`
 Expected: every package `ok`. No behavior changed; the diff is one new helper, one transaction wrapper, and two new tests.
 
 ---

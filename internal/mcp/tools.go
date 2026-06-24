@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"bbrain/internal/app"
-	"bbrain/internal/fact"
-	"bbrain/internal/store"
+	"github.com/JaraEsequiel/BBrain/internal/app"
+	"github.com/JaraEsequiel/BBrain/internal/fact"
+	"github.com/JaraEsequiel/BBrain/internal/store"
 )
 
 // DefaultTools is BBrain's MCP tool catalog.

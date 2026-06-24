@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **Module:** `bbrain`. **Go:** `go 1.25`. **Root:** `/home/vex/Projects/BBrain/`. **No new dependencies.**
+- **Module:** `bbrain`. **Go:** `go 1.25`. **Root:** `BBrain/`. **No new dependencies.**
 - **`.md` is source of truth; the index is disposable** — rebuilt at the new root after a move, never moved-and-trusted (its `path` column would be stale).
 - **Safe/non-destructive:** refuse when `dest == src` or `dest` exists and is non-empty. Prefer atomic `os.Rename`; on a cross-device failure, copy the tree then remove the source **only after a verified copy**; never leave a partial copy.
 - **Layering:** `internal/vault` imports only stdlib; `internal/app` orchestrates and reuses `internal/setup.EnvExportLine` + `App.SetupClaudeCode`; `cmd/bbrain` wires the command.
@@ -137,7 +137,7 @@ func TestMoveMissingSource(t *testing.T) {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/vault/`
+Run: `cd BBrain && go test ./internal/vault/`
 Expected: FAIL (package does not exist).
 
 - [ ] **Step 3: Implement `vault.go`**
@@ -253,12 +253,12 @@ func copyFile(srcPath, destPath string, d fs.DirEntry) error {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/vault/` → PASS. Then `go vet ./internal/vault/`.
+Run: `cd BBrain && go test ./internal/vault/` → PASS. Then `go vet ./internal/vault/`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/vault/
 git commit -m "feat(vault): Move — relocate a brain tree (atomic rename + cross-device copy fallback)"
 ```
@@ -327,7 +327,7 @@ func TestVaultMoveRefreshesProject(t *testing.T) {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/app/`
+Run: `cd BBrain && go test ./internal/app/`
 Expected: FAIL (undefined `VaultMove`, `VaultMoveOptions`).
 
 - [ ] **Step 3: Implement `VaultMove`**
@@ -371,12 +371,12 @@ func (a *App) VaultMove(dest string, opts VaultMoveOptions) (string, int, error)
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/app/` → PASS. Then `go vet ./internal/app/`.
+Run: `cd BBrain && go test ./internal/app/` → PASS. Then `go vet ./internal/app/`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/app/
 git commit -m "feat(app): VaultMove — relocate brain, rebuild index, refresh env.sh + optional project"
 ```
@@ -444,7 +444,7 @@ func TestVaultUsage(t *testing.T) {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./cmd/...`
+Run: `cd BBrain && go test ./cmd/...`
 Expected: FAIL (`vault` unknown).
 
 - [ ] **Step 3: Wire the command**
@@ -492,12 +492,12 @@ func cmdVault(args []string, stdout, stderr io.Writer) int {
 
 - [ ] **Step 4: Run the full suite**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./...` → PASS. Then `go vet ./...`.
+Run: `cd BBrain && go test ./...` → PASS. Then `go vet ./...`.
 
 - [ ] **Step 5: Manual smoke test**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 go build ./cmd/bbrain
 rm -rf /tmp/bbrain-vault-smoke && export BBRAIN_HOME=/tmp/bbrain-vault-smoke/brain
 ./bbrain init
@@ -512,7 +512,7 @@ Expected: `vault move` prints `moved brain to /tmp/bbrain-vault-smoke/moved (rei
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add cmd/bbrain/
 git commit -m "feat(cli): bbrain vault move <dest> (relocate brain) with e2e"
 ```

@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **Module path:** `bbrain` (all imports `bbrain/internal/...`). **Go:** `go 1.25`. **Root:** `/home/vex/Projects/BBrain/` (`engram/` is reference only — never import it).
+- **Module path:** `bbrain` (all imports `bbrain/internal/...`). **Go:** `go 1.25`. **Root:** `BBrain/` (`engram/` is reference only — never import it).
 - **`.md` is source of truth.** `wiki link` writes links into **fact** `.md` files via `store.AddLink` (which bumps `updated_at`, leaves `revision_count` untouched, and dedups by target). `wiki lint --fix` mutates only via existing/tested write paths plus the new `store.RemoveLink`, and regenerates the derived `wiki/index.md`.
 - **BBrain orchestrates; the LLM is a pure text→JSON function.** Same Plan 3 contract (prompt on stdin, one JSON object on stdout, via `$BBRAIN_AGENT_CLI`). `wiki link` requires it (unset → error mentioning `BBRAIN_AGENT_CLI`, exit 1). **`wiki lint` does NOT use the LLM** and runs with `BBRAIN_AGENT_CLI` unset.
 - **Clean layering:** `internal/wiki` imports only `fact`, `llm`, stdlib. It never imports `store`/`index`. All data access and all writes live in `internal/app`.
@@ -198,7 +198,7 @@ func (s *staticRunner) Run(ctx context.Context, prompt string) (string, error) {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/wiki/`
+Run: `cd BBrain && go test ./internal/wiki/`
 Expected: FAIL (undefined `Candidate`, `ProposedLink`, `BuildLinkPrompt`, `ParseLinkResponse`, `ValidateProposals`, `Link`, `LinkOptions`).
 
 - [ ] **Step 3: Implement the link core**
@@ -369,13 +369,13 @@ func Link(ctx context.Context, opts LinkOptions) ([]FactProposals, error) {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/wiki/`
+Run: `cd BBrain && go test ./internal/wiki/`
 Expected: PASS (all prior wiki tests + the new link tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 go vet ./internal/wiki/
 git add internal/wiki/link.go internal/wiki/link_test.go
 git commit -m "feat(wiki): link prompt, parse, validation, and per-fact LLM loop"
@@ -483,7 +483,7 @@ func TestWikiLinkIsIdempotent(t *testing.T) {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/app/`
+Run: `cd BBrain && go test ./internal/app/`
 Expected: FAIL (undefined `WikiLink`, `WikiLinkOptions`).
 
 - [ ] **Step 3: Implement `WikiLink` + `snippet`**
@@ -610,13 +610,13 @@ func (a *App) WikiLink(ctx context.Context, opts WikiLinkOptions) (wiki.LinkResu
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/app/`
+Run: `cd BBrain && go test ./internal/app/`
 Expected: PASS (existing app tests + the 3 new ones).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 go vet ./internal/app/
 git add internal/app/app.go internal/app/app_test.go
 git commit -m "feat(app): WikiLink — candidates -> LLM -> validated, idempotent link writes"
@@ -712,7 +712,7 @@ func TestWikiLinkUnconfiguredFails(t *testing.T) {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./cmd/...`
+Run: `cd BBrain && go test ./cmd/...`
 Expected: FAIL (`wiki link` unknown → assertions fail).
 
 - [ ] **Step 3: Add the subcommand**
@@ -775,13 +775,13 @@ func cmdWikiLink(args []string, stdout, stderr io.Writer) int {
 
 - [ ] **Step 4: Run the full suite**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./...`
+Run: `cd BBrain && go test ./...`
 Expected: PASS (all packages).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 go vet ./...
 git add cmd/bbrain/main.go cmd/bbrain/main_test.go
 git commit -m "feat(cli): wiki link command (project/scope/limit/dry-run) with e2e test"
@@ -910,7 +910,7 @@ func TestLintClean(t *testing.T) {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/wiki/`
+Run: `cd BBrain && go test ./internal/wiki/`
 Expected: FAIL (undefined `Issue`, `LintResult`, `Lint`).
 
 - [ ] **Step 3: Implement the lint engine**
@@ -1043,13 +1043,13 @@ func Lint(wikiDir string, facts []fact.Fact, validCategories map[string]bool) ([
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/wiki/`
+Run: `cd BBrain && go test ./internal/wiki/`
 Expected: PASS (all prior wiki tests + the 3 new lint tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 go vet ./internal/wiki/
 git add internal/wiki/lint.go internal/wiki/lint_test.go
 git commit -m "feat(wiki): deterministic lint engine (dangling/missing/orphan/stale checks)"
@@ -1151,7 +1151,7 @@ func TestWikiLintReportsAndFixes(t *testing.T) {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/store/ ./internal/app/`
+Run: `cd BBrain && go test ./internal/store/ ./internal/app/`
 Expected: FAIL (undefined `RemoveLink`, `WikiLint`, `WikiLintOptions`).
 
 - [ ] **Step 3: Implement `store.RemoveLink`**
@@ -1273,13 +1273,13 @@ func (a *App) WikiLint(opts WikiLintOptions) (wiki.LintResult, error) {
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/store/ ./internal/app/`
+Run: `cd BBrain && go test ./internal/store/ ./internal/app/`
 Expected: PASS (existing tests + the new `RemoveLink` and `WikiLint` tests).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 go vet ./internal/store/ ./internal/app/
 git add internal/store/store.go internal/store/store_test.go internal/app/app.go internal/app/app_test.go
 git commit -m "feat(store,app): RemoveLink + WikiLint (report + safe --fix, derived index regen)"
@@ -1362,7 +1362,7 @@ func TestEndToEndWikiLintFix(t *testing.T) {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./cmd/...`
+Run: `cd BBrain && go test ./cmd/...`
 Expected: FAIL (`wiki lint` unknown → assertions fail).
 
 - [ ] **Step 3: Add the subcommand**
@@ -1414,13 +1414,13 @@ func cmdWikiLint(args []string, stdout, stderr io.Writer) int {
 
 - [ ] **Step 4: Run the full suite**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./...`
+Run: `cd BBrain && go test ./...`
 Expected: PASS (all packages).
 
 - [ ] **Step 5: Manual smoke test**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 go build ./cmd/bbrain
 rm -rf /tmp/bbrain-smoke3b
 export BBRAIN_HOME=/tmp/bbrain-smoke3b
@@ -1456,7 +1456,7 @@ Expected: `wiki link --dry-run` prints the proposed edge without writing; `wiki 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 go vet ./...
 git add cmd/bbrain/main.go cmd/bbrain/main_test.go
 git commit -m "feat(cli): wiki lint command (report + --fix, CI exit codes) with e2e test"

@@ -12,7 +12,7 @@
 
 - **Module path:** `bbrain` (local module; all imports are `bbrain/internal/...`).
 - **Go version:** `go 1.25` in `go.mod`.
-- **New project root:** `/home/vex/Projects/BBrain/` (the existing `engram/` subdir is reference only — never import from it).
+- **New project root:** `BBrain/` (the existing `engram/` subdir is reference only — never import from it).
 - **`.md` is source of truth.** The index must be 100% reconstructable from the `.md` files. No data may live only in the index.
 - **SQLite driver:** `modernc.org/sqlite`, registered driver name `"sqlite"`. FTS5 is built in.
 - **Atomic writes:** every `.md` write goes through `atomic.WriteFile` so a crash never leaves a half-written memory.
@@ -145,18 +145,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./cmd/...`
+Run: `cd BBrain && go test ./cmd/...`
 Expected: PASS (both tests).
 
 - [ ] **Step 5: Verify it builds and runs**
 
-Run: `cd /home/vex/Projects/BBrain && go build ./cmd/bbrain && ./bbrain version`
+Run: `cd BBrain && go build ./cmd/bbrain && ./bbrain version`
 Expected: prints `bbrain 0.1.0-dev`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 echo "/bbrain" > .gitignore
 git init -q 2>/dev/null || true
 git add go.mod cmd/bbrain/main.go cmd/bbrain/main_test.go .gitignore
@@ -183,7 +183,7 @@ git commit -m "feat: scaffold bbrain CLI with version command"
 
 - [ ] **Step 1: Add the yaml dependency**
 
-Run: `cd /home/vex/Projects/BBrain && go get gopkg.in/yaml.v3@v3.0.1`
+Run: `cd BBrain && go get gopkg.in/yaml.v3@v3.0.1`
 Expected: adds `gopkg.in/yaml.v3` to `go.mod`.
 
 - [ ] **Step 2: Write the failing test**
@@ -265,7 +265,7 @@ func TestParseRejectsMissingFrontmatter(t *testing.T) {
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/fact/`
+Run: `cd BBrain && go test ./internal/fact/`
 Expected: FAIL (package does not compile — `Slug`, `NewID`, `Marshal`, `Parse` undefined).
 
 - [ ] **Step 4: Write `internal/fact/fact.go`**
@@ -391,13 +391,13 @@ func NewID(date, title string) string {
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/fact/`
+Run: `cd BBrain && go test ./internal/fact/`
 Expected: PASS (all 4 tests).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add go.mod go.sum internal/fact/
 git commit -m "feat: fact package with markdown parse/serialize, slug, id"
 ```
@@ -494,7 +494,7 @@ func mustFile(t *testing.T, p string) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/brain/`
+Run: `cd BBrain && go test ./internal/brain/`
 Expected: FAIL (undefined `New`, etc.).
 
 - [ ] **Step 3: Write `internal/brain/brain.go`**
@@ -581,13 +581,13 @@ BBrain through its MCP tools, not this file.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/brain/`
+Run: `cd BBrain && go test ./internal/brain/`
 Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/brain/
 git commit -m "feat: brain package with init + path helpers"
 ```
@@ -612,7 +612,7 @@ git commit -m "feat: brain package with init + path helpers"
 
 - [ ] **Step 1: Add the atomic-write dependency**
 
-Run: `cd /home/vex/Projects/BBrain && go get github.com/natefinch/atomic@v1.0.1`
+Run: `cd BBrain && go get github.com/natefinch/atomic@v1.0.1`
 Expected: adds `github.com/natefinch/atomic` to `go.mod`.
 
 - [ ] **Step 2: Write the failing test**
@@ -713,7 +713,7 @@ func TestSaveDedupesIdenticalWithinWindow(t *testing.T) {
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/store/`
+Run: `cd BBrain && go test ./internal/store/`
 Expected: FAIL (undefined `New`, `Save`, `SaveInput`, etc.).
 
 - [ ] **Step 4: Write `internal/store/store.go`**
@@ -880,13 +880,13 @@ func hashParts(parts ...string) string {
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/store/`
+Run: `cd BBrain && go test ./internal/store/`
 Expected: PASS (3 tests).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add go.mod go.sum internal/store/
 git commit -m "feat: store with fact write, topic_key upsert, dedup window"
 ```
@@ -912,7 +912,7 @@ git commit -m "feat: store with fact write, topic_key upsert, dedup window"
 
 - [ ] **Step 1: Add the sqlite dependency**
 
-Run: `cd /home/vex/Projects/BBrain && go get modernc.org/sqlite@v1.45.0`
+Run: `cd BBrain && go get modernc.org/sqlite@v1.45.0`
 Expected: adds `modernc.org/sqlite` (+ transitive `modernc.org/*`) to `go.mod`.
 
 - [ ] **Step 2: Write the failing test**
@@ -1000,7 +1000,7 @@ func must(t *testing.T, err error) {
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/index/`
+Run: `cd BBrain && go test ./internal/index/`
 Expected: FAIL (undefined `Open`, `Index`, etc.).
 
 - [ ] **Step 4: Write `internal/index/index.go`**
@@ -1131,13 +1131,13 @@ func buildMatch(q string) string {
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/index/`
+Run: `cd BBrain && go test ./internal/index/`
 Expected: PASS (4 tests).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add go.mod go.sum internal/index/
 git commit -m "feat: FTS5 index with upsert, search, clear"
 ```
@@ -1224,7 +1224,7 @@ func TestReindexRebuildsFromDisk(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/app/`
+Run: `cd BBrain && go test ./internal/app/`
 Expected: FAIL (undefined `New`, `App`, etc.).
 
 - [ ] **Step 3: Write `internal/app/app.go`**
@@ -1315,7 +1315,7 @@ func (a *App) Search(query string, limit int) ([]index.Result, error) {
 
 - [ ] **Step 4: Run app tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/app/`
+Run: `cd BBrain && go test ./internal/app/`
 Expected: PASS (2 tests).
 
 - [ ] **Step 5: Wire the CLI — rewrite `cmd/bbrain/main.go`**
@@ -1482,13 +1482,13 @@ func TestEndToEndSaveAndSearch(t *testing.T) {
 
 - [ ] **Step 7: Run the full suite**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./...`
+Run: `cd BBrain && go test ./...`
 Expected: PASS (all packages).
 
 - [ ] **Step 8: Manual smoke test**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 go build ./cmd/bbrain
 BBRAIN_HOME=/tmp/bbrain-smoke ./bbrain init
 BBRAIN_HOME=/tmp/bbrain-smoke ./bbrain save --title "Use JWT" --project demo --type decision --body "stateless"
@@ -1501,7 +1501,7 @@ Expected: search prints the saved fact; deleting `.bbrain/` and reindexing resto
 - [ ] **Step 9: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/app/ cmd/bbrain/
 git commit -m "feat: app glue + CLI init/save/search/reindex with e2e test"
 ```

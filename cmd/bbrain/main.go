@@ -10,15 +10,17 @@ import (
 	"strings"
 	"time"
 
-	"bbrain/internal/app"
-	"bbrain/internal/install"
-	"bbrain/internal/mcp"
-	"bbrain/internal/prompthook"
-	"bbrain/internal/store"
-	"bbrain/internal/watch"
+	"github.com/JaraEsequiel/BBrain/internal/app"
+	"github.com/JaraEsequiel/BBrain/internal/install"
+	"github.com/JaraEsequiel/BBrain/internal/mcp"
+	"github.com/JaraEsequiel/BBrain/internal/prompthook"
+	"github.com/JaraEsequiel/BBrain/internal/store"
+	"github.com/JaraEsequiel/BBrain/internal/watch"
 )
 
-const version = "0.1.0-dev"
+// version is the build version. Overridden at release time via
+// -ldflags "-X main.version=<tag>"; "dev" for local builds.
+var version = "dev"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))

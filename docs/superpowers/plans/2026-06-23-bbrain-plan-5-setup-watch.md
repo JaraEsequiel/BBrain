@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **Module:** `bbrain`. **Go:** `go 1.25`. **Root:** `/home/vex/Projects/BBrain/`. **No new dependencies.**
+- **Module:** `bbrain`. **Go:** `go 1.25`. **Root:** `BBrain/`. **No new dependencies.**
 - **Idempotent + non-destructive:** Markdown edits use a managed block `<!-- BBRAIN:BEGIN -->`/`<!-- BBRAIN:END -->`; `.mcp.json` is a JSON merge preserving other servers/keys. Re-running replaces only BBrain's region.
 - **`--dry-run`** returns/prints actions and exact content without writing.
 - **Pure builders** (`internal/setup`, `internal/watch`) take inputs and return strings/bytes; the only disk I/O is `app.SetupClaudeCode` and the `watch` loop.
@@ -141,7 +141,7 @@ func TestEnvExportLine(t *testing.T) {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/setup/`
+Run: `cd BBrain && go test ./internal/setup/`
 Expected: FAIL (package does not exist).
 
 - [ ] **Step 3: Implement `setup.go`**
@@ -251,12 +251,12 @@ func EnvExportLine(adapterPath string) string {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/setup/` → PASS. Then `go vet ./internal/setup/`.
+Run: `cd BBrain && go test ./internal/setup/` → PASS. Then `go vet ./internal/setup/`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/setup/
 git commit -m "feat(setup): pure builders — agent adapter, .mcp.json merge, managed CLAUDE.md block"
 ```
@@ -336,7 +336,7 @@ func TestFactsFingerprintMissingDir(t *testing.T) {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/watch/`
+Run: `cd BBrain && go test ./internal/watch/`
 Expected: FAIL (package does not exist).
 
 - [ ] **Step 3: Implement `watch.go`**
@@ -393,12 +393,12 @@ func FactsFingerprint(dir string) (string, error) {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/watch/` → PASS. Then `go vet ./internal/watch/`.
+Run: `cd BBrain && go test ./internal/watch/` → PASS. Then `go vet ./internal/watch/`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/watch/
 git commit -m "feat(watch): FactsFingerprint — stdlib change detection over raws/facts"
 ```
@@ -476,7 +476,7 @@ func TestSetupClaudeCodeWritesAndIsIdempotent(t *testing.T) {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/app/`
+Run: `cd BBrain && go test ./internal/app/`
 Expected: FAIL (undefined `SetupClaudeCode`, `SetupOptions`).
 
 - [ ] **Step 3: Implement `SetupClaudeCode`**
@@ -549,12 +549,12 @@ func (a *App) SetupClaudeCode(opts SetupOptions) ([]SetupAction, error) {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/app/` → PASS. Then `go vet ./internal/app/`.
+Run: `cd BBrain && go test ./internal/app/` → PASS. Then `go vet ./internal/app/`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/app/
 git commit -m "feat(app): SetupClaudeCode — write adapter, .mcp.json, CLAUDE.md block, env.sh (idempotent)"
 ```
@@ -634,7 +634,7 @@ func TestEndToEndWatchOnce(t *testing.T) {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./cmd/...`
+Run: `cd BBrain && go test ./cmd/...`
 Expected: FAIL (`setup`/`watch` unknown).
 
 - [ ] **Step 3: Wire the commands**
@@ -727,12 +727,12 @@ func cmdWatch(args []string, stdout, stderr io.Writer) int {
 
 - [ ] **Step 4: Run the full suite**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./...` → PASS. Then `go vet ./...`.
+Run: `cd BBrain && go test ./...` → PASS. Then `go vet ./...`.
 
 - [ ] **Step 5: Manual smoke test**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 go build ./cmd/bbrain
 rm -rf /tmp/bbrain-setup-smoke && mkdir -p /tmp/bbrain-setup-smoke/proj
 export BBRAIN_HOME=/tmp/bbrain-setup-smoke/brain
@@ -750,7 +750,7 @@ Expected: dry-run prints 4 actions with content and writes nothing; the write ru
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add cmd/bbrain/
 git commit -m "feat(cli): bbrain setup claude-code + bbrain watch (with e2e)"
 ```

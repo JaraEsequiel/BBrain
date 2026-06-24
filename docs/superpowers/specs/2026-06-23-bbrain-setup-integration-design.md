@@ -17,7 +17,7 @@ Stdlib only — **no TUI/watcher dependencies**. The "TUI" is a clear, flag-driv
 
 ## 2. Global Constraints
 
-- **Module:** `bbrain`; **Go:** 1.25; **root:** `/home/vex/Projects/BBrain/`. **No new dependencies.**
+- **Module:** `bbrain`; **Go:** 1.25; **root:** `BBrain/`. **No new dependencies.**
 - **Idempotent + non-destructive:** all file edits use a managed block delimited by `<!-- BBRAIN:BEGIN -->` / `<!-- BBRAIN:END -->` (for Markdown) or a JSON merge that **preserves** unrelated content (other MCP servers, the rest of CLAUDE.md). Re-running replaces only the managed region.
 - **`--dry-run`** prints every action and the exact content that would be written, touching nothing.
 - **Generation is pure + testable:** the artifact builders (`internal/setup`) are pure functions over inputs returning strings/bytes; disk I/O lives in a thin app-layer method. Tests assert content + merge/idempotency without real Claude Code.

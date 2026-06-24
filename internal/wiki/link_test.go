@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"bbrain/internal/fact"
+	"github.com/JaraEsequiel/BBrain/internal/fact"
 )
 
 type linkFakeRunner struct {

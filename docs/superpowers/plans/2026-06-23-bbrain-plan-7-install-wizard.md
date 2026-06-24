@@ -134,7 +134,7 @@ func TestSkillsAndRemoveBlock(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail** — `cd /home/vex/Projects/BBrain && go test ./internal/setup/` → FAIL (undefined identifiers).
+- [ ] **Step 2: Run tests to verify they fail** — `cd BBrain && go test ./internal/setup/` → FAIL (undefined identifiers).
 
 - [ ] **Step 3: Implement** — append to `internal/setup/setup.go` (imports `encoding/json`, `strings` already present):
 
@@ -495,7 +495,7 @@ func must(t *testing.T, err error) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail** — `cd /home/vex/Projects/BBrain && go test ./internal/install/` → FAIL (package missing).
+- [ ] **Step 2: Run tests to verify they fail** — `cd BBrain && go test ./internal/install/` → FAIL (package missing).
 
 - [ ] **Step 3: Implement** — create `internal/install/install.go`:
 
@@ -1099,7 +1099,7 @@ func cmdUninstall(args []string, stdout, stderr io.Writer) int {
 - [ ] **Step 5: Manual smoke test**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 go build -o ~/.local/bin/bbrain ./cmd/bbrain
 rm -rf /tmp/bb-wiz && mkdir -p /tmp/bb-wiz/proj
 # non-interactive project install
@@ -1117,7 +1117,7 @@ Expected: project install writes `.mcp.json` (con `BBRAIN_HOME=/tmp/bb-wiz/vault
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add cmd/bbrain/
 git commit -m "feat(cli): bbrain install/uninstall wizard; remove setup"
 ```

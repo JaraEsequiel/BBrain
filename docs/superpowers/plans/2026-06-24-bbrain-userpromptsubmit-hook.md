@@ -874,7 +874,7 @@ git commit -m "feat(cli): wire bbrain prompt-submit subcommand"
 
 ## Post-implementation: migrate the live brain
 
-After the binary is rebuilt, the existing `~/VexOs/memory/.bbrain/index.db` still has the old schema (no `updated_at`). One command migrates it (Task 2 made `reindex` recreate the table):
+After the binary is rebuilt, the existing `~/.bbrain/default/.bbrain/index.db` still has the old schema (no `updated_at`). One command migrates it (Task 2 made `reindex` recreate the table):
 
 ```bash
 go build -o bbrain ./cmd/bbrain

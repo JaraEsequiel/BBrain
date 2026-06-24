@@ -11,7 +11,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"bbrain/internal/app"
+	"github.com/JaraEsequiel/BBrain/internal/app"
 )
 
 // ProtocolVersion is the MCP protocol version this server advertises.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"bbrain/internal/fact"
+	"github.com/JaraEsequiel/BBrain/internal/fact"
 )
 
 func lintWritePage(t *testing.T, dir, rel, cat, gen string, sources []string, body string) {

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"bbrain/internal/fact"
+	"github.com/JaraEsequiel/BBrain/internal/fact"
 )
 
 func must(t *testing.T, err error) {

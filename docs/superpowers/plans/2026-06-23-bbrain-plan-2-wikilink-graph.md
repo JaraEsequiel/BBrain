@@ -12,7 +12,7 @@
 
 - **Module path:** `bbrain` (local module; all imports are `bbrain/internal/...`).
 - **Go version:** `go 1.25` in `go.mod`.
-- **Project root:** `/home/vex/Projects/BBrain/` (the `engram/` subdir is reference only — never import from it).
+- **Project root:** `BBrain/` (the `engram/` subdir is reference only — never import from it).
 - **`.md` is source of truth.** The `links` table, like the FTS table, must be 100% reconstructable from the `.md` files. No edge may live only in the index.
 - **SQLite driver:** `modernc.org/sqlite`, registered driver name `"sqlite"`. The `links` table lives in the same `index.db` as `facts_fts`.
 - **Atomic writes:** every `.md` rewrite goes through `atomic.WriteFile`.
@@ -103,7 +103,7 @@ func TestLinkTargetRoundTrip(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/fact/`
+Run: `cd BBrain && go test ./internal/fact/`
 Expected: FAIL (undefined `ValidRelation`, `FormatTarget`, `LinkTargetID`).
 
 - [ ] **Step 3: Add the helpers to `internal/fact/fact.go`**
@@ -141,13 +141,13 @@ func LinkTargetID(target string) string {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/fact/`
+Run: `cd BBrain && go test ./internal/fact/`
 Expected: PASS (existing tests + the 2 new ones).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/fact/
 git commit -m "feat(fact): relation vocab + wikilink target helpers"
 ```
@@ -258,7 +258,7 @@ func TestAddLinkValidates(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/store/`
+Run: `cd BBrain && go test ./internal/store/`
 Expected: FAIL (undefined `Get`, `AddLink`).
 
 - [ ] **Step 3: Add `fmt` to the imports of `internal/store/store.go`**
@@ -374,13 +374,13 @@ func (s *Store) AddLink(srcID, dstID, relation, why string) (fact.Fact, error) {
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/store/`
+Run: `cd BBrain && go test ./internal/store/`
 Expected: PASS (existing tests + the 4 new ones).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/store/
 git commit -m "feat(store): Get by id + AddLink writes reasoned wikilink into .md"
 ```
@@ -505,7 +505,7 @@ func TestSearchAnyMatchesAnyTerm(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/index/`
+Run: `cd BBrain && go test ./internal/index/`
 Expected: FAIL (undefined `IndexLinks`, `Why`, `Neighbors`, `SearchAny`, `Edge`, `Neighbor`).
 
 - [ ] **Step 3: Add the `links` schema and exec it in `Open`**
@@ -781,13 +781,13 @@ func buildMatchAny(q string) string {
 
 - [ ] **Step 7: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/index/`
+Run: `cd BBrain && go test ./internal/index/`
 Expected: PASS (existing tests + the 5 new ones).
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/index/
 git commit -m "feat(index): derived links table, Why/Neighbors graph queries, SearchAny"
 ```
@@ -934,7 +934,7 @@ func TestCandidatesExcludesSelfAndLinked(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/app/`
+Run: `cd BBrain && go test ./internal/app/`
 Expected: FAIL (undefined `Link`, `Why`, `Related`, `Candidates`).
 
 - [ ] **Step 3: Add `fmt` and `strings` to the imports of `internal/app/app.go`**
@@ -1097,13 +1097,13 @@ func (a *App) Candidates(id string, limit int) ([]index.Result, error) {
 
 - [ ] **Step 6: Run app tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/app/`
+Run: `cd BBrain && go test ./internal/app/`
 Expected: PASS (existing tests + the 3 new ones).
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/app/
 git commit -m "feat(app): Link/Why/Related/Candidates + reindex rebuilds edges"
 ```
@@ -1183,7 +1183,7 @@ func TestEndToEndLinkWhyRelated(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./cmd/...`
+Run: `cd BBrain && go test ./cmd/...`
 Expected: FAIL (the `link`/`why`/`related` commands are unknown → non-zero exit).
 
 - [ ] **Step 3: Add the subcommand cases and usage line in `cmd/bbrain/main.go`**
@@ -1316,13 +1316,13 @@ func cmdCandidates(args []string, stdout, stderr io.Writer) int {
 
 - [ ] **Step 5: Run the full suite**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./...`
+Run: `cd BBrain && go test ./...`
 Expected: PASS (all packages).
 
 - [ ] **Step 6: Manual smoke test**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 go build ./cmd/bbrain
 rm -rf /tmp/bbrain-smoke2
 BBRAIN_HOME=/tmp/bbrain-smoke2 ./bbrain init
@@ -1341,7 +1341,7 @@ Expected: `why` prints the `depends-on` edge with its reason; `related` shows `$
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add cmd/bbrain/
 git commit -m "feat(cli): link/why/related/candidates commands with e2e test"
 ```

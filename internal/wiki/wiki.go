@@ -19,8 +19,8 @@ import (
 	"github.com/natefinch/atomic"
 	"gopkg.in/yaml.v3"
 
-	"bbrain/internal/fact"
-	"bbrain/internal/llm"
+	"github.com/JaraEsequiel/BBrain/internal/fact"
+	"github.com/JaraEsequiel/BBrain/internal/llm"
 )
 
 // Page is one wiki page produced by the LLM.

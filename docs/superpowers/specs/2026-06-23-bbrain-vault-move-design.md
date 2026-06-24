@@ -13,7 +13,7 @@
 
 ## 2. Global Constraints
 
-- **Module:** `bbrain`; **Go:** 1.25; **root:** `/home/vex/Projects/BBrain/`. **No new dependencies.**
+- **Module:** `bbrain`; **Go:** 1.25; **root:** `BBrain/`. **No new dependencies.**
 - **`.md` is source of truth; the index is disposable** — after a move it is rebuilt from disk at the new root, never moved-and-trusted (its `path` column would be stale).
 - **Non-destructive / safe:** refuse when `dest == src`, or when `dest` already exists and is non-empty (never clobber). Prefer `os.Rename` (atomic within a filesystem); on a cross-device error (`EXDEV`), fall back to copy-tree-then-remove-src, verifying the copy before deleting the source.
 - **Path resolution:** the brain root is `brainRoot()` = `$BBRAIN_HOME` or `~/.bbrain/default`. `vault move` operates on that resolved root. After the move the user must point `$BBRAIN_HOME` at `<dest>` (the command prints this); we never edit the user's shell rc.

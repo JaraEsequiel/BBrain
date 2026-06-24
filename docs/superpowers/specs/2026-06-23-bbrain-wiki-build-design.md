@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-23
 **Status:** Approved (design phase)
-**Author:** vex (esequieljara2002@gmail.com)
+**Author:** Esequiel Jara (@JaraEsequiel)
 **Builds on:** Plan 1 (core engine), Plan 2 (reasoned wikilink graph). Part of the 1→6 roadmap (header of Plan 1). This is Plan 3.
 
 ---

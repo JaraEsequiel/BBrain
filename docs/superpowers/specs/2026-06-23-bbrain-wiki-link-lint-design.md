@@ -20,7 +20,7 @@ Both reuse the Plan 1–3 layering and the `internal/llm` runner. No new depende
 
 ## 2. Global Constraints (inherited + new)
 
-- **Module:** `bbrain`; **Go:** 1.25; **root:** `/home/vex/Projects/BBrain/` (`engram/` is reference only, never imported).
+- **Module:** `bbrain`; **Go:** 1.25; **root:** `BBrain/` (`engram/` is reference only, never imported).
 - **`.md` is the source of truth.** `wiki link` writes links into the **fact** `.md` files (through `store.AddLink`, which already bumps `updated_at` / preserves `revision_count` invariants from Plan 2). `wiki lint --fix` mutates only via existing, tested write paths (`store` for facts, `RegenerateIndex` for the derived index).
 - **BBrain orchestrates; the LLM is a pure text→JSON function.** Same contract as Plan 3: prompt on stdin, one JSON object on stdout, reached via `$BBRAIN_AGENT_CLI`. `wiki link` requires it (unset → clear error, exit 1). **`wiki lint` does NOT use the LLM** and works with `BBRAIN_AGENT_CLI` unset.
 - **Clean layering:** `internal/wiki` decides (LLM prompt + parse + structural validation, pure and fake-runner-testable) and **never imports `store`/`index`**. `internal/app` fetches data (`ListFacts`, `Candidates`, existing `Links`) and performs writes (`store.AddLink`, `RegenerateIndex`). `--dry-run` = app skips the write.

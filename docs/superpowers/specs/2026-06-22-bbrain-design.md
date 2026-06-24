@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-22
 **Status:** Approved (design phase)
-**Author:** vex (esequieljara2002@gmail.com)
+**Author:** Esequiel Jara (@JaraEsequiel)
 
 ---
 

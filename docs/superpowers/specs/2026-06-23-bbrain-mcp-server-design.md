@@ -17,7 +17,7 @@ zero-runtime-dependency property. No new dependencies.
 
 ## 2. Global Constraints (inherited + new)
 
-- **Module:** `bbrain`; **Go:** 1.25; **root:** `/home/vex/Projects/BBrain/`.
+- **Module:** `bbrain`; **Go:** 1.25; **root:** `BBrain/`.
 - **No new dependencies.** The MCP server is implemented with `encoding/json`, `bufio`,
   `io`, `context`, stdlib only.
 - **`.md` is source of truth.** Tools call the existing `internal/app` façade; the MCP

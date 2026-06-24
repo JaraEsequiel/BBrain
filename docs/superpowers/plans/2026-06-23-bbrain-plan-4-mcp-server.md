@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **Module path:** `bbrain`. **Go:** `go 1.25`. **Root:** `/home/vex/Projects/BBrain/`.
+- **Module path:** `bbrain`. **Go:** `go 1.25`. **Root:** `BBrain/`.
 - **No new dependencies.** MCP-over-stdio is hand-rolled with stdlib.
 - **Transport:** newline-delimited JSON — one JSON-RPC message per line. **stdout carries ONLY protocol JSON; all logs/diagnostics go to stderr.**
 - **Protocol:** JSON-RPC 2.0; advertise `protocolVersion` `"2025-06-18"`; capability `tools:{}`. Lifecycle `initialize` → `notifications/initialized` (notification, no response) → `tools/list` / `tools/call` / `ping`.
@@ -196,7 +196,7 @@ Note: the fake handlers take the real `*app.App` (matching `Tool.Handler`) but n
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/mcp/`
+Run: `cd BBrain && go test ./internal/mcp/`
 Expected: FAIL (package `mcp` does not exist).
 
 - [ ] **Step 3: Implement `tool.go`**
@@ -412,13 +412,13 @@ func (s *Server) version() string {
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/mcp/`
+Run: `cd BBrain && go test ./internal/mcp/`
 Expected: PASS (5 tests). Then `go vet ./internal/mcp/`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/mcp/tool.go internal/mcp/server.go internal/mcp/server_test.go
 git commit -m "feat(mcp): minimal stdio JSON-RPC server core (initialize/tools-list/tools-call)"
 ```
@@ -520,7 +520,7 @@ func TestAppGetAndDelete(t *testing.T) {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/index/ ./internal/store/ ./internal/app/`
+Run: `cd BBrain && go test ./internal/index/ ./internal/store/ ./internal/app/`
 Expected: FAIL (undefined `DeleteFact`, `Delete`, `Get`).
 
 - [ ] **Step 3: Implement `index.DeleteFact`**
@@ -601,13 +601,13 @@ func (a *App) Delete(id string) (bool, error) {
 
 - [ ] **Step 6: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/index/ ./internal/store/ ./internal/app/`
+Run: `cd BBrain && go test ./internal/index/ ./internal/store/ ./internal/app/`
 Expected: PASS. Then `go vet ./...`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/index/ internal/store/ internal/app/
 git commit -m "feat(index,store,app): DeleteFact + Delete + Get (fact removal keeps index in sync)"
 ```
@@ -741,7 +741,7 @@ func (f fakeBuildRunner) Run(ctx context.Context, prompt string) (string, error)
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/mcp/`
+Run: `cd BBrain && go test ./internal/mcp/`
 Expected: FAIL (undefined `DefaultTools`).
 
 - [ ] **Step 3: Implement `tools.go`**
@@ -1021,13 +1021,13 @@ func handleWikiLint(ctx context.Context, a *app.App, raw json.RawMessage) (any, 
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./internal/mcp/`
+Run: `cd BBrain && go test ./internal/mcp/`
 Expected: PASS (Task 1 tests + the catalog tests). Then `go vet ./internal/mcp/`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add internal/mcp/tools.go internal/mcp/tools_test.go
 git commit -m "feat(mcp): tool catalog — mem_* and wiki_* handlers over the app facade"
 ```
@@ -1094,7 +1094,7 @@ func runStdin(t *testing.T, args []string, stdin string, out, errOut *bytes.Buff
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./cmd/...`
+Run: `cd BBrain && go test ./cmd/...`
 Expected: FAIL (`mcp` unknown; `runWithIn`/`runStdin` undefined).
 
 - [ ] **Step 3: Wire the command**
@@ -1143,13 +1143,13 @@ func cmdMCP(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 - [ ] **Step 4: Run the full suite**
 
-Run: `cd /home/vex/Projects/BBrain && go test ./...`
+Run: `cd BBrain && go test ./...`
 Expected: PASS (all packages). Then `go vet ./...`.
 
 - [ ] **Step 5: Manual smoke test**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 go build ./cmd/bbrain
 rm -rf /tmp/bbrain-mcp-smoke && export BBRAIN_HOME=/tmp/bbrain-mcp-smoke
 ./bbrain init
@@ -1166,7 +1166,7 @@ Expected: 4 JSON-RPC responses on stdout — `initialize` (protocolVersion + too
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/vex/Projects/BBrain
+cd BBrain
 git add cmd/bbrain/main.go cmd/bbrain/main_test.go
 git commit -m "feat(cli): bbrain mcp — serve the MCP tool catalog over stdio, with protocol e2e"
 ```
@@ -1178,7 +1178,7 @@ git commit -m "feat(cli): bbrain mcp — serve the MCP tool catalog over stdio, 
 After merge, validate the server against the real Claude Code MCP client:
 
 ```bash
-cd /home/vex/Projects/BBrain && go build -o ./bbrain ./cmd/bbrain
+cd BBrain && go build -o ./bbrain ./cmd/bbrain
 claude mcp add bbrain --env BBRAIN_HOME=$HOME/.bbrain/default -- "$(pwd)/bbrain" mcp
 claude mcp list           # expect: bbrain ... ✓ Connected
 ```

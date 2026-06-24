@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"bbrain/internal/brain"
-	"bbrain/internal/index"
+	"github.com/JaraEsequiel/BBrain/internal/brain"
+	"github.com/JaraEsequiel/BBrain/internal/index"
 )
 
 type hookInput struct {

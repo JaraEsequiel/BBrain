@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"bbrain/internal/fact"
-	"bbrain/internal/index"
-	"bbrain/internal/store"
+	"github.com/JaraEsequiel/BBrain/internal/fact"
+	"github.com/JaraEsequiel/BBrain/internal/index"
+	"github.com/JaraEsequiel/BBrain/internal/store"
 )
 
 func TestSaveThenSearch(t *testing.T) {

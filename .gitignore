@@ -1,2 +1,5 @@
 /bbrain
 .superpowers/
+
+# Release artifacts
+/dist/

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"bbrain/internal/fact"
+	"github.com/JaraEsequiel/BBrain/internal/fact"
 )
 
 // Issue is one consistency problem found by Lint.

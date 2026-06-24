@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"bbrain/internal/fact"
-	"bbrain/internal/llm"
+	"github.com/JaraEsequiel/BBrain/internal/fact"
+	"github.com/JaraEsequiel/BBrain/internal/llm"
 )
 
 // Candidate is a fact offered to the LLM as a possible link target for a source

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"bbrain/internal/app"
+	"github.com/JaraEsequiel/BBrain/internal/app"
 )
 
 var errBoom = errors.New("boom")

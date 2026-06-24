@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"bbrain/internal/app"
+	"github.com/JaraEsequiel/BBrain/internal/app"
 )
 
 func toolByName(t *testing.T, name string) Tool {

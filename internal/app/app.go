@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"bbrain/internal/brain"
-	"bbrain/internal/fact"
-	"bbrain/internal/index"
-	"bbrain/internal/llm"
-	"bbrain/internal/setup"
-	"bbrain/internal/store"
-	"bbrain/internal/vault"
-	"bbrain/internal/wiki"
+	"github.com/JaraEsequiel/BBrain/internal/brain"
+	"github.com/JaraEsequiel/BBrain/internal/fact"
+	"github.com/JaraEsequiel/BBrain/internal/index"
+	"github.com/JaraEsequiel/BBrain/internal/llm"
+	"github.com/JaraEsequiel/BBrain/internal/setup"
+	"github.com/JaraEsequiel/BBrain/internal/store"
+	"github.com/JaraEsequiel/BBrain/internal/vault"
+	"github.com/JaraEsequiel/BBrain/internal/wiki"
 )
 
 // App is the high-level façade over one brain.

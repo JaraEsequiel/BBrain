@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"bbrain/internal/app"
+	"github.com/JaraEsequiel/BBrain/internal/app"
 )
 
 // Tool is one MCP tool: metadata advertised by tools/list and a handler invoked

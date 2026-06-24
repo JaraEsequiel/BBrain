@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"bbrain/internal/brain"
-	"bbrain/internal/setup"
+	"github.com/JaraEsequiel/BBrain/internal/brain"
+	"github.com/JaraEsequiel/BBrain/internal/setup"
 	"github.com/natefinch/atomic"
 )
 

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"bbrain/internal/brain"
+	"github.com/JaraEsequiel/BBrain/internal/brain"
 )
 
 func newTestStore(t *testing.T) *Store {

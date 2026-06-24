@@ -9,7 +9,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"bbrain/internal/fact"
+	"github.com/JaraEsequiel/BBrain/internal/fact"
 )
 
 // Index wraps a SQLite connection holding the FTS5 facts table.

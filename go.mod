@@ -1,4 +1,4 @@
-module bbrain
+module github.com/JaraEsequiel/BBrain
 
 go 1.25
 

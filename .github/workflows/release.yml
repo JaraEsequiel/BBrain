@@ -1,0 +1,50 @@
+name: release
+
+# Cross-compiles bbrain for macOS/Linux (amd64+arm64) and publishes the
+# binaries as GitHub Release assets. Pure-Go (CGO disabled) so a single
+# Linux runner builds every target. Triggered by pushing a tag like v0.1.0.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write  # needed to create the release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binaries
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -eu
+          VERSION="${GITHUB_REF_NAME}"
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            os="${target%/*}"; arch="${target#*/}"
+            echo "building $os/$arch ..."
+            GOOS="$os" GOARCH="$arch" go build \
+              -trimpath \
+              -ldflags "-s -w -X main.version=${VERSION}" \
+              -o dist/bbrain ./cmd/bbrain
+            tar -C dist -czf "dist/bbrain_${os}_${arch}.tar.gz" bbrain
+            rm dist/bbrain
+          done
+          ( cd dist && sha256sum *.tar.gz > checksums.txt )
+          ls -l dist
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            dist/*.tar.gz dist/checksums.txt

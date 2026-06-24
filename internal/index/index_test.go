@@ -3,7 +3,7 @@ package index
 import (
 	"testing"
 
-	"bbrain/internal/fact"
+	"github.com/JaraEsequiel/BBrain/internal/fact"
 )
 
 func openMem(t *testing.T) *Index {

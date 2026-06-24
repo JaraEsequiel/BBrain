@@ -142,3 +142,27 @@ func TestMemSaveTopicKeyUpsert(t *testing.T) {
 		t.Fatalf("topic_key upsert created a new id: %s vs %s", id1, id2)
 	}
 }
+
+func TestHandleMemSavePinned(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	raw := json.RawMessage(`{"type":"about-me","title":"About","body":"hi","scope":"global","topic_key":"profile/about-me","pinned":true}`)
+	out, err := handleMemSave(context.Background(), a, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, ok := out.(map[string]any)
+	if !ok || m["pinned"] != true {
+		t.Fatalf("output did not echo pinned:true: %#v", out)
+	}
+	// Persisted — reload by id (independent of the digest / Task B).
+	got, found, err := a.Get(m["id"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || !got.Pinned {
+		t.Fatalf("pinned not persisted: found=%v fact=%+v", found, got)
+	}
+}

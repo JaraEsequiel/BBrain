@@ -200,21 +200,21 @@ func (ix *Index) Neighbors(id string) ([]Neighbor, error) {
 	return out, rows.Err()
 }
 
-// Clear empties the index (used before a full reindex): both the FTS table and
-// the derived links table, in a single transaction so the index is never left
-// half-cleared if the second delete fails.
-func (ix *Index) Clear() error {
-	tx, err := ix.db.Begin()
-	if err != nil {
-		return err
-	}
-	for _, stmt := range []string{`DELETE FROM facts_fts`, `DELETE FROM links`} {
-		if _, err := tx.Exec(stmt); err != nil {
-			tx.Rollback()
+// Reset drops and recreates the derived tables so a schema change in `schema`
+// takes effect. Unlike a row-wipe, this migrates the table definition; callers
+// repopulate via IndexFact. The index is derived from the .md files, so dropping
+// it loses nothing.
+func (ix *Index) Reset() error {
+	for _, stmt := range []string{
+		`DROP TABLE IF EXISTS facts_fts`,
+		`DROP TABLE IF EXISTS links`,
+		schema, linksSchema,
+	} {
+		if _, err := ix.db.Exec(stmt); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // Result is one search hit.

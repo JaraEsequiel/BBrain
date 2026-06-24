@@ -64,7 +64,7 @@ func (a *App) Reindex() (int, error) {
 		return 0, err
 	}
 	defer ix.Close()
-	if err := ix.Clear(); err != nil {
+	if err := ix.Reset(); err != nil {
 		return 0, err
 	}
 	for _, f := range facts {

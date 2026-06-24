@@ -256,6 +256,42 @@ func TestRemoveLink(t *testing.T) {
 	}
 }
 
+func TestSavePinnedNewAndUpsert(t *testing.T) {
+	s := newTestStore(t) // reuse this file's existing store constructor
+	f, err := s.Save(SaveInput{Type: "about-me", Title: "About", Body: "v1",
+		Scope: "global", TopicKey: "profile/about-me", Pinned: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.Pinned {
+		t.Fatalf("new save lost pinned: %+v", f)
+	}
+	f2, err := s.Save(SaveInput{Type: "about-me", Title: "About", Body: "v2",
+		Scope: "global", TopicKey: "profile/about-me", Pinned: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f2.Pinned || f2.Body != "v2" || f2.ID != f.ID {
+		t.Fatalf("upsert wrong: %+v", f2)
+	}
+}
+
+func TestSavePinnedToggleEscapesDedupe(t *testing.T) {
+	s := newTestStore(t) // reuse existing helper
+	f1, err := s.Save(SaveInput{Type: "note", Title: "T", Body: "B", Scope: "global"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Same content, Pinned toggled — must NOT be deduped, must return a new fact with Pinned:true.
+	f2, err := s.Save(SaveInput{Type: "note", Title: "T", Body: "B", Scope: "global", Pinned: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f2.Pinned {
+		t.Fatalf("pinned toggle was deduped: f1=%+v f2=%+v", f1, f2)
+	}
+}
+
 func TestDelete(t *testing.T) {
 	s := newTestStore(t)
 	f, err := s.Save(SaveInput{Type: "decision", Title: "Doomed", Body: "x", Project: "p", Scope: "project"})

@@ -1,6 +1,9 @@
 package fact
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSlug(t *testing.T) {
 	cases := map[string]string{
@@ -94,6 +97,29 @@ func TestLinkTargetRoundTrip(t *testing.T) {
 	// Tolerates a bare slug and surrounding whitespace.
 	if got := LinkTargetID("  [[session-model]] "); got != "session-model" {
 		t.Fatalf("LinkTargetID(messy) = %q, want %q", got, "session-model")
+	}
+}
+
+func TestPinnedRoundTrip(t *testing.T) {
+	f := Fact{
+		ID: "x", Type: "about-me", Scope: "global",
+		CreatedAt: "2026-06-24T00:00:00Z", UpdatedAt: "2026-06-24T00:00:00Z",
+		RevisionCount: 1, Pinned: true,
+		Title: "About", Body: "hi",
+	}
+	got, err := Parse(Marshal(f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Pinned {
+		t.Fatalf("pinned lost in round-trip: %+v", got)
+	}
+}
+
+func TestPinnedOmittedWhenFalse(t *testing.T) {
+	out := Marshal(Fact{ID: "x", Type: "decision", Title: "T", Body: "b"})
+	if strings.Contains(out, "pinned") {
+		t.Fatalf("pinned:false must not appear on disk:\n%s", out)
 	}
 }
 

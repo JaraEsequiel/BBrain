@@ -256,6 +256,26 @@ func TestRemoveLink(t *testing.T) {
 	}
 }
 
+func TestSavePinnedNewAndUpsert(t *testing.T) {
+	s := newTestStore(t) // reuse this file's existing store constructor
+	f, err := s.Save(SaveInput{Type: "about-me", Title: "About", Body: "v1",
+		Scope: "global", TopicKey: "profile/about-me", Pinned: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.Pinned {
+		t.Fatalf("new save lost pinned: %+v", f)
+	}
+	f2, err := s.Save(SaveInput{Type: "about-me", Title: "About", Body: "v2",
+		Scope: "global", TopicKey: "profile/about-me", Pinned: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f2.Pinned || f2.Body != "v2" || f2.ID != f.ID {
+		t.Fatalf("upsert wrong: %+v", f2)
+	}
+}
+
 func TestDelete(t *testing.T) {
 	s := newTestStore(t)
 	f, err := s.Save(SaveInput{Type: "decision", Title: "Doomed", Body: "x", Project: "p", Scope: "project"})

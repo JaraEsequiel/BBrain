@@ -41,6 +41,7 @@ type SaveInput struct {
 	Scope    string
 	TopicKey string
 	Tags     []string
+	Pinned   bool
 }
 
 // PathFor returns the .md path for a fact.
@@ -68,6 +69,7 @@ func (s *Store) Save(in SaveInput) (fact.Fact, error) {
 				e.Title = in.Title
 				e.Body = in.Body
 				e.Tags = in.Tags
+				e.Pinned = in.Pinned
 				e.UpdatedAt = nowStr
 				e.RevisionCount++
 				if err := s.write(e); err != nil {
@@ -97,6 +99,7 @@ func (s *Store) Save(in SaveInput) (fact.Fact, error) {
 		Project:       in.Project,
 		TopicKey:      in.TopicKey,
 		Tags:          in.Tags,
+		Pinned:        in.Pinned,
 		CreatedAt:     nowStr,
 		UpdatedAt:     nowStr,
 		RevisionCount: 1,

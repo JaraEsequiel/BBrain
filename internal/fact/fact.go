@@ -29,6 +29,7 @@ type Fact struct {
 	TopicKey      string   `yaml:"topic_key,omitempty"`
 	Tags          []string `yaml:"tags,omitempty"`
 	Links         []Link   `yaml:"links,omitempty"`
+	Pinned        bool     `yaml:"pinned,omitempty"`
 	CreatedAt     string   `yaml:"created_at"`
 	UpdatedAt     string   `yaml:"updated_at"`
 	RevisionCount int      `yaml:"revision_count"`

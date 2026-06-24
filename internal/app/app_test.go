@@ -517,3 +517,86 @@ func TestContextEmptyBrain(t *testing.T) {
 		t.Fatalf("empty context should say (none yet): %s", out)
 	}
 }
+
+func TestContextPinnedGlobalShownUnderAnyProject(t *testing.T) {
+	a := New(t.TempDir())
+	must(t, a.Init())
+	if _, err := a.Save(store.SaveInput{Type: "about-me", Title: "About you",
+		Body: "User is Vex. Prefers terse answers.", Scope: "global",
+		TopicKey: "profile/about-me", Pinned: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Save(store.SaveInput{Type: "decision", Title: "Proj note",
+		Body: "x", Project: "shopapp", Scope: "project"}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := a.Context("shopapp", 10)
+	must(t, err)
+	if !strings.Contains(out, "## About you & pinned context") {
+		t.Fatalf("missing pinned heading: %s", out)
+	}
+	if !strings.Contains(out, "Prefers terse answers") {
+		t.Fatalf("pinned full body missing: %s", out)
+	}
+	if !strings.Contains(out, "background to") {
+		t.Fatalf("preamble missing: %s", out)
+	}
+}
+
+func TestContextPinnedNotDuplicatedInRecent(t *testing.T) {
+	a := New(t.TempDir())
+	must(t, a.Init())
+	if _, err := a.Save(store.SaveInput{Type: "about-me", Title: "About you",
+		Body: "body", Scope: "global", TopicKey: "profile/about-me",
+		Pinned: true}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := a.Context("", 10)
+	must(t, err)
+	if strings.Contains(out, "[about-me] About you") {
+		t.Fatalf("pinned fact leaked into Recent bullets: %s", out)
+	}
+}
+
+func TestContextProjectScopedPinnedHiddenElsewhere(t *testing.T) {
+	a := New(t.TempDir())
+	must(t, a.Init())
+	if _, err := a.Save(store.SaveInput{Type: "note", Title: "Shop pin",
+		Body: "only shop", Project: "shopapp", Scope: "project",
+		TopicKey: "shop/pin", Pinned: true}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := a.Context("datacli", 10)
+	must(t, err)
+	if strings.Contains(out, "only shop") || strings.Contains(out, "## About you & pinned context") {
+		t.Fatalf("project-scoped pin leaked to other project: %s", out)
+	}
+}
+
+func TestContextGlobalNonPinnedVisibleUnderProject(t *testing.T) {
+	a := New(t.TempDir())
+	must(t, a.Init())
+	if _, err := a.Save(store.SaveInput{Type: "decision", Title: "Global rule",
+		Body: "g", Scope: "global"}); err != nil { // Project == ""
+		t.Fatal(err)
+	}
+	out, err := a.Context("shopapp", 10)
+	must(t, err)
+	if !strings.Contains(out, "Global rule") {
+		t.Fatalf("global non-pinned fact dropped under project filter: %s", out)
+	}
+}
+
+func TestContextNoPinnedHeadingWhenNonePinned(t *testing.T) {
+	a := New(t.TempDir())
+	must(t, a.Init())
+	if _, err := a.Save(store.SaveInput{Type: "decision", Title: "Plain",
+		Body: "p", Project: "p", Scope: "project"}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := a.Context("", 10)
+	must(t, err)
+	if strings.Contains(out, "## About you & pinned context") {
+		t.Fatalf("pinned heading shown with no pinned facts: %s", out)
+	}
+}

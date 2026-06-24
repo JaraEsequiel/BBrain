@@ -85,3 +85,16 @@ End-to-end, against the real `claude` CLI:
 4. **Relocate lifecycle:** `bbrain vault move` relocated the brain (reindexed) → re-registered the MCP server at the new home → ✔ Connected → Claude `mem_search` still found the fact at the relocated home.
 
 The complete BBrain ↔ Claude Code integration — memory CRUD over MCP, LLM-driven wiki distillation via the adapter, and safe relocation — is validated in runtime.
+
+---
+
+## Plan 7 install wizard — live Claude Code validation (PASS)
+
+Date: 2026-06-23 (Plan 7 merged as PR #8; supersedes the Plan 5 `setup` flow).
+
+- `bbrain install --non-interactive --scope project` writes the vault (`L/memory` + degraded `L/CLAUDE.md`), `./.mcp.json` (BBRAIN_HOME=L/memory), the managed `./CLAUDE.md` block, `./.claude/settings.json` (SessionStart hook → `bbrain context --home L/memory`), and `./.claude/skills/bbrain-{recall,remember}/SKILL.md`.
+- **User scope, with a temp HOME (real `~/.claude` untouched):** install run twice → both exit 0 (remove-then-add makes the user-scope MCP idempotent), exactly one managed CLAUDE.md block, and `claude mcp get bbrain` → ✔ Connected. `bbrain uninstall --scope user` reverses it, keeping the vault.
+- **Config-loss guard verified:** with an existing-but-unreadable project `CLAUDE.md`, `install` aborts ("permission denied") and the user's file is preserved — never overwritten with just BBrain's block.
+- Interactive wizard prompts 3 steps (vault/agent/scope), blank → default.
+
+The wizard is the canonical install path: `bbrain install` (interactive) or with flags for automation; `bbrain uninstall` cleanly reverses it.

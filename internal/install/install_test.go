@@ -58,12 +58,12 @@ func TestPlanInstallUserScopeUsesMCPCLI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sawCLI bool
+	var sawAdd bool
 	for _, a := range acts {
-		if a.Kind == "mcp-cli" {
-			sawCLI = true
+		if a.Kind == "mcp-cli" && len(a.Argv) > 2 && a.Argv[2] == "add" {
+			sawAdd = true
 			if strings.Join(a.Argv, " ") != "claude mcp add -s user bbrain -e BBRAIN_HOME="+filepath.Join(o.Vault, "memory")+" -- bbrain mcp" {
-				t.Fatalf("mcp-cli argv = %v", a.Argv)
+				t.Fatalf("mcp-cli add argv = %v", a.Argv)
 			}
 		}
 		// user-scope CLAUDE.md/settings go under HomeDir/.claude
@@ -71,8 +71,8 @@ func TestPlanInstallUserScopeUsesMCPCLI(t *testing.T) {
 			t.Fatalf("user-scope settings path = %s", a.Path)
 		}
 	}
-	if !sawCLI {
-		t.Fatal("user scope must register MCP via the claude CLI")
+	if !sawAdd {
+		t.Fatal("user scope must register MCP via the claude CLI add command")
 	}
 }
 
@@ -124,6 +124,33 @@ func TestApplyAndUninstallProjectScope(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(o.Vault, "memory")); err != nil {
 		t.Fatal("uninstall without --purge deleted the vault")
+	}
+}
+
+func TestPlanInstallUserScopeIsIdempotentViaRemoveThenAdd(t *testing.T) {
+	o := projOpts(t)
+	o.Scope = "user"
+	acts, err := PlanInstall(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var removeIdx, addIdx = -1, -1
+	for i, a := range acts {
+		if a.Kind != "mcp-cli" {
+			continue
+		}
+		if len(a.Argv) > 2 && a.Argv[2] == "remove" {
+			removeIdx = i
+			if !a.IgnoreError {
+				t.Fatal("the pre-remove must set IgnoreError")
+			}
+		}
+		if len(a.Argv) > 2 && a.Argv[2] == "add" {
+			addIdx = i
+		}
+	}
+	if removeIdx < 0 || addIdx < 0 || removeIdx > addIdx {
+		t.Fatalf("user scope must emit remove before add: remove=%d add=%d", removeIdx, addIdx)
 	}
 }
 

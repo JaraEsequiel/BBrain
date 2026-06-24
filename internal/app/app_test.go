@@ -513,4 +513,7 @@ func TestContextEmptyBrain(t *testing.T) {
 	if !strings.Contains(out, "BBrain memory context") {
 		t.Fatalf("empty context = %s", out)
 	}
+	if !strings.Contains(out, "(none yet)") {
+		t.Fatalf("empty context should say (none yet): %s", out)
+	}
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"bbrain/internal/app"
+	"bbrain/internal/install"
 	"bbrain/internal/mcp"
 	"bbrain/internal/store"
 	"bbrain/internal/watch"
@@ -41,7 +42,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func runWithIn(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates|wiki|setup|watch|vault|mcp> [args]")
+		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates|wiki|install|uninstall|context|watch|vault|mcp> [args]")
 		return 2
 	}
 	switch args[0] {
@@ -79,8 +80,10 @@ func runWithIn(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdCandidates(args[1:], stdout, stderr)
 	case "wiki":
 		return cmdWiki(args[1:], stdout, stderr)
-	case "setup":
-		return cmdSetup(args[1:], stdout, stderr)
+	case "install":
+		return cmdInstall(args[1:], stdin, stdout, stderr)
+	case "uninstall":
+		return cmdUninstall(args[1:], stdout, stderr)
 	case "watch":
 		return cmdWatch(args[1:], stdout, stderr)
 	case "vault":
@@ -370,46 +373,6 @@ func cmdMCP(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func cmdSetup(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "claude-code" {
-		fmt.Fprintln(stderr, "setup: usage: bbrain setup claude-code [--dir D] [--home H] [--model M] [--dry-run]")
-		return 2
-	}
-	fs := flag.NewFlagSet("setup claude-code", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	dir := fs.String("dir", ".", "project dir for .mcp.json + CLAUDE.md")
-	home := fs.String("home", "", "brain home (default: resolved brain root)")
-	model := fs.String("model", "claude-sonnet-4-6", "claude model for the adapter")
-	dry := fs.Bool("dry-run", false, "print actions without writing")
-	if err := fs.Parse(args[1:]); err != nil {
-		return 2
-	}
-	bh := *home
-	if bh == "" {
-		bh = brainRoot()
-	}
-	a := app.New(bh)
-	actions, err := a.SetupClaudeCode(app.SetupOptions{ProjectDir: *dir, BrainHome: bh, Model: *model, DryRun: *dry})
-	if err != nil {
-		fmt.Fprintf(stderr, "setup: %v\n", err)
-		return 1
-	}
-	if *dry {
-		fmt.Fprintln(stdout, "[dry-run] would write:")
-	}
-	for _, act := range actions {
-		fmt.Fprintf(stdout, "%s — %s\n", act.Path, act.Summary)
-		if *dry {
-			fmt.Fprintln(stdout, act.Content)
-		}
-	}
-	if !*dry {
-		fmt.Fprintf(stdout, "\nDone. In this project Claude Code reads .mcp.json automatically; set the wiki backend with: source %s\n",
-			filepath.Join(bh, ".bbrain", "env.sh"))
-	}
-	return 0
-}
-
 func cmdWatch(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -493,5 +456,114 @@ func cmdContext(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprint(stdout, out)
+	return 0
+}
+
+func defaultVault() string {
+	if h, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(h, "bbrain")
+	}
+	return "bbrain"
+}
+
+func cmdInstall(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("install", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	vault := fs.String("vault", defaultVault(), "vault location L (memory + degraded CLAUDE.md)")
+	agent := fs.String("agent", "claude-code", "code agent to integrate")
+	scope := fs.String("scope", "", "install scope: user|project")
+	model := fs.String("model", "claude-sonnet-4-6", "claude model for the LLM adapter")
+	dry := fs.Bool("dry-run", false, "print actions without writing")
+	nonInteractive := fs.Bool("non-interactive", false, "use flags only; no prompts")
+	project := fs.String("project", "", "project directory (default: cwd)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	home, _ := os.UserHomeDir()
+	cwd, _ := os.Getwd()
+	projDir := *project
+	if projDir == "" {
+		projDir = cwd
+	}
+	o := install.Options{Vault: *vault, Agent: *agent, Scope: *scope, Model: *model,
+		HomeDir: home, ProjectDir: projDir, DryRun: *dry}
+	if !*nonInteractive {
+		def := o
+		if def.Scope == "" {
+			def.Scope = "project"
+		}
+		resolved, err := install.Wizard(stdin, stdout, def)
+		if err != nil {
+			fmt.Fprintf(stderr, "install: %v\n", err)
+			return 1
+		}
+		o.Vault, o.Agent, o.Scope = resolved.Vault, resolved.Agent, resolved.Scope
+	}
+	if o.Scope != "user" && o.Scope != "project" {
+		fmt.Fprintln(stderr, "install: --scope must be user or project")
+		return 2
+	}
+	actions, err := install.PlanInstall(o)
+	if err != nil {
+		fmt.Fprintf(stderr, "install: %v\n", err)
+		return 1
+	}
+	if o.DryRun {
+		fmt.Fprintln(stdout, "[dry-run] would do:")
+		for _, a := range actions {
+			fmt.Fprintf(stdout, "- %s — %s\n", a.Path, a.Summary)
+		}
+		return 0
+	}
+	if err := install.Apply(actions); err != nil {
+		fmt.Fprintf(stderr, "install: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "installed BBrain (%s scope). Memory vault: %s\n", o.Scope, filepath.Join(o.Vault, "memory"))
+	fmt.Fprintf(stdout, "wiki backend: source %s\n", filepath.Join(o.Vault, "memory", ".bbrain", "env.sh"))
+	return 0
+}
+
+func cmdUninstall(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	vault := fs.String("vault", defaultVault(), "vault location (for --purge)")
+	agent := fs.String("agent", "claude-code", "code agent")
+	scope := fs.String("scope", "", "scope: user|project")
+	project := fs.String("project", "", "project directory (default: cwd)")
+	purge := fs.Bool("purge", false, "also delete the vault (DESTROYS memory)")
+	dry := fs.Bool("dry-run", false, "print actions without writing")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *scope != "user" && *scope != "project" {
+		fmt.Fprintln(stderr, "uninstall: --scope must be user or project")
+		return 2
+	}
+	home, _ := os.UserHomeDir()
+	cwd, _ := os.Getwd()
+	projDir := *project
+	if projDir == "" {
+		projDir = cwd
+	}
+	o := install.Options{Vault: *vault, Agent: *agent, Scope: *scope, HomeDir: home, ProjectDir: projDir, DryRun: *dry, Purge: *purge}
+	actions, err := install.PlanUninstall(o)
+	if err != nil {
+		fmt.Fprintf(stderr, "uninstall: %v\n", err)
+		return 1
+	}
+	if o.DryRun {
+		fmt.Fprintln(stdout, "[dry-run] would do:")
+		for _, a := range actions {
+			fmt.Fprintf(stdout, "- %s — %s\n", a.Path, a.Summary)
+		}
+		return 0
+	}
+	if err := install.Apply(actions); err != nil {
+		fmt.Fprintf(stderr, "uninstall: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "uninstalled BBrain (%s scope).%s\n", o.Scope,
+		map[bool]string{true: " Vault purged.", false: " Vault kept."}[o.Purge])
 	return 0
 }

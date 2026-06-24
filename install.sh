@@ -59,13 +59,17 @@ chmod +x "$tmp/bbrain"
 dir="${BBRAIN_BIN_DIR:-/usr/local/bin}"
 if [ -w "$dir" ] 2>/dev/null || { [ ! -e "$dir" ] && mkdir -p "$dir" 2>/dev/null; }; then
 	mv "$tmp/bbrain" "$dir/bbrain"
-elif command -v sudo >/dev/null 2>&1 && [ "${BBRAIN_BIN_DIR:-}" = "" ]; then
-	echo "install: $dir needs elevated permissions, using sudo ..."
-	sudo mv "$tmp/bbrain" "$dir/bbrain"
+elif [ "${BBRAIN_BIN_DIR:-}" = "" ] && command -v sudo >/dev/null 2>&1 && \
+     echo "install: $dir needs elevated permissions, trying sudo ..." && \
+     sudo mv "$tmp/bbrain" "$dir/bbrain"; then
+	: # installed via sudo
 else
+	# no write access and sudo unavailable/declined/denied — fall back to a
+	# user-writable dir instead of aborting.
 	dir="$HOME/.local/bin"
 	mkdir -p "$dir"
 	mv "$tmp/bbrain" "$dir/bbrain"
+	echo "install: used $dir (no permission for ${BBRAIN_BIN_DIR:-/usr/local/bin})"
 fi
 
 echo "install: installed bbrain to $dir/bbrain"

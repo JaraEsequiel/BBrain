@@ -246,7 +246,7 @@ func (ix *Index) SearchAny(query string, limit int) ([]Result, error) {
 
 func (ix *Index) search(match string, limit int) ([]Result, error) {
 	if match == "" {
-		return nil, nil
+		return []Result{}, nil
 	}
 	rows, err := ix.db.Query(
 		`SELECT fact_id, title, type, project, path
@@ -259,7 +259,7 @@ func (ix *Index) search(match string, limit int) ([]Result, error) {
 	}
 	defer rows.Close()
 
-	var out []Result
+	out := make([]Result, 0)
 	for rows.Next() {
 		var r Result
 		if err := rows.Scan(&r.FactID, &r.Title, &r.Type, &r.Project, &r.Path); err != nil {

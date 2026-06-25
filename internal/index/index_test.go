@@ -59,6 +59,24 @@ func TestSearchQueryWithSpecialCharsDoesNotError(t *testing.T) {
 	}
 }
 
+func TestSearchNoMatchReturnsNonNilSlice(t *testing.T) {
+	ix := openMem(t)
+	// A zero-match search (and a blank query) must yield a non-nil empty slice so
+	// the MCP layer serializes "results": [] rather than null — null reads as error.
+	for _, q := range []string{"nothingmatchesthis", ""} {
+		got, err := ix.Search(q, 10)
+		if err != nil {
+			t.Fatalf("Search(%q): %v", q, err)
+		}
+		if got == nil {
+			t.Fatalf("Search(%q) returned nil slice; want non-nil empty", q)
+		}
+		if len(got) != 0 {
+			t.Fatalf("Search(%q) = %v; want empty", q, got)
+		}
+	}
+}
+
 func TestResetEmptiesIndex(t *testing.T) {
 	ix := openMem(t)
 	must(t, ix.IndexFact(sampleFact("f1", "Use JWT", "body", "decision", "bbrain"), "/x/f1.md"))

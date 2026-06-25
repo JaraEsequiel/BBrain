@@ -522,6 +522,24 @@ func TestMCPHomeFlag(t *testing.T) {
 	}
 }
 
+// TestMCPWarnsOnMissingBrain locks in the loud-failure signal: pointing mcp at a
+// home with no brain must emit a warning to stderr (not exit non-zero, and not
+// stay silent — silence is what made the original bug invisible).
+func TestMCPWarnsOnMissingBrain(t *testing.T) {
+	t.Setenv("BBRAIN_HOME", t.TempDir())
+	missing := filepath.Join(t.TempDir(), "no-brain-here")
+
+	var out, errOut bytes.Buffer
+	// Empty stdin: the server reads to EOF and exits cleanly.
+	code := runStdin(t, []string{"mcp", "--home", missing}, "", &out, &errOut)
+	if code != 0 {
+		t.Fatalf("mcp exit=%d err=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "warning") || !strings.Contains(errOut.String(), missing) {
+		t.Fatalf("expected a stderr warning naming %q, got: %q", missing, errOut.String())
+	}
+}
+
 func TestEndToEndContext(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("BBRAIN_HOME", home)

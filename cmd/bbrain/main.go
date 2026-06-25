@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"github.com/JaraEsequiel/BBrain/internal/prompthook"
 	"github.com/JaraEsequiel/BBrain/internal/store"
 	"github.com/JaraEsequiel/BBrain/internal/watch"
+	"github.com/mattn/go-isatty"
 )
 
 // version is the build version. Overridden at release time via
@@ -525,12 +527,20 @@ func cmdInstall(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	o := install.Options{Vault: *vault, Agent: *agent, Scope: *scope, Model: *model,
 		HomeDir: home, ProjectDir: projDir, DryRun: *dry}
 	if !*nonInteractive {
+		if !isatty.IsTerminal(os.Stdin.Fd()) || !isatty.IsTerminal(os.Stdout.Fd()) {
+			fmt.Fprintln(stderr, "install: no interactive terminal; use --non-interactive with --vault/--scope")
+			return 2
+		}
 		def := o
 		if def.Scope == "" {
 			def.Scope = "project"
 		}
-		resolved, err := install.Wizard(stdin, stdout, def)
+		resolved, err := install.Wizard(def)
 		if err != nil {
+			if errors.Is(err, install.ErrAborted) {
+				fmt.Fprintln(stdout, "install: cancelled.")
+				return 0
+			}
 			fmt.Fprintf(stderr, "install: %v\n", err)
 			return 1
 		}

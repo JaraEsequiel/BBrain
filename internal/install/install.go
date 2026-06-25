@@ -1,5 +1,6 @@
-// Package install builds and applies the BBrain → Claude Code integration: a stdin
-// wizard, a scope-aware plan of filesystem/CLI actions, and an applier. Reversible.
+// Package install builds and applies the BBrain → Claude Code integration: an
+// interactive TUI wizard, a scope-aware plan of filesystem/CLI actions, and an
+// applier. Reversible.
 package install
 
 import (
@@ -92,6 +93,9 @@ func normalizeVault(path string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("install: cannot expand ~: %w", err)
 		}
+		// Trim only the "~", not "~/", so the "~" alone case (→ home) works too.
+		// filepath.Join treats the resulting "/sub" as a path component, not a
+		// root, so Join(home, "/sub") == home/sub — do not "simplify" to "~/".
 		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
 	}
 	abs, err := filepath.Abs(path)

@@ -98,7 +98,12 @@ func (a *App) Save(in store.SaveInput) (fact.Fact, error) {
 	return f, nil
 }
 
-// Search runs a lexical search over the index.
+// Search runs a lexical search over the index. It first tries strict AND (every
+// term must co-occur) for precision, then falls back to OR (any term) when AND
+// finds nothing — so a broad multi-keyword query like "Juan Jara role company"
+// still surfaces partially-overlapping facts instead of returning empty. BM25
+// keeps the best-covering facts on top. Single-term queries are unaffected (AND
+// and OR are identical there).
 func (a *App) Search(query string, limit int) ([]index.Result, error) {
 	if err := a.ensureIndexDir(); err != nil {
 		return nil, err
@@ -108,7 +113,14 @@ func (a *App) Search(query string, limit int) ([]index.Result, error) {
 		return nil, err
 	}
 	defer ix.Close()
-	return ix.Search(query, limit)
+	res, err := ix.Search(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	if len(res) == 0 {
+		return ix.SearchAny(query, limit)
+	}
+	return res, nil
 }
 
 // Link adds (or updates) a reasoned wikilink from srcID to dstID on the source

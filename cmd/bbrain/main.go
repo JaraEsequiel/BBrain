@@ -380,6 +380,11 @@ func cmdMCP(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		root = brainRoot()
 	}
 	a := app.New(root)
+	// Loud signal for the classic misconfiguration: a wrong/unset home resolves to
+	// a path with no brain, and every tool then returns empty without any error.
+	if _, err := os.Stat(a.Brain.FactsDir()); os.IsNotExist(err) {
+		fmt.Fprintf(stderr, "mcp: warning: no brain at %q (facts dir missing); tools will return empty until --home/BBRAIN_HOME points at a real brain or `bbrain init` runs there\n", root)
+	}
 	srv := &mcp.Server{App: a, Tools: mcp.DefaultTools()}
 	if err := srv.Serve(context.Background(), stdin, stdout); err != nil {
 		fmt.Fprintf(stderr, "mcp: %v\n", err)

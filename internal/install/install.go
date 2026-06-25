@@ -3,14 +3,14 @@
 package install
 
 import (
-	"bufio"
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	huh "charm.land/huh/v2"
 	"github.com/JaraEsequiel/BBrain/internal/brain"
 	"github.com/JaraEsequiel/BBrain/internal/setup"
 	"github.com/natefinch/atomic"
@@ -269,37 +269,64 @@ func Apply(actions []Action) error {
 	return nil
 }
 
-// Wizard runs the step-by-step prompts over in/out, returning resolved Options.
-// Blank answers keep the shown default.
-func Wizard(in io.Reader, out io.Writer, def Options) (Options, error) {
-	r := bufio.NewReader(in)
-	ask := func(label, dflt string) (string, error) {
-		fmt.Fprintf(out, "%s [%s]: ", label, dflt)
-		line, err := r.ReadString('\n')
-		if err != nil && len(line) == 0 {
-			return "", err
-		}
-		if line = strings.TrimSpace(line); line == "" {
-			return dflt, nil
-		}
-		return line, nil
-	}
+// ErrAborted is returned by Wizard when the user cancels the TUI (Ctrl-C or
+// declining the final confirmation), so the caller can exit cleanly.
+var ErrAborted = errors.New("install: cancelled by user")
+
+// Wizard runs the interactive TUI — arrow-key scope select, a validated vault
+// input, and a final confirm — and returns resolved Options. def supplies the
+// shown defaults. It drives the real terminal (os.Stdin/os.Stdout); the caller
+// must ensure a TTY before invoking. The returned Vault is the raw text the
+// user accepted; PlanInstall normalizes it.
+func Wizard(def Options) (Options, error) {
 	o := def
-	var err error
-	if o.Vault, err = ask("Vault location", def.Vault); err != nil {
+	o.Agent = "claude-code" // the only supported agent; never asked
+
+	scope := def.Scope
+	if scope != "user" && scope != "project" {
+		scope = "project"
+	}
+	vault := def.Vault
+	confirmed := true
+
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Scope de instalación").
+				Description("Dónde se registra BBrain en Claude Code").
+				Options(
+					huh.NewOption("project — este repositorio", "project"),
+					huh.NewOption("user — global (todos los proyectos)", "user"),
+				).
+				Value(&scope),
+			huh.NewInput().
+				Title("Ubicación del vault").
+				Description("Carpeta de la memoria (~ y rutas relativas se resuelven a absolutas)").
+				Value(&vault).
+				Validate(func(s string) error {
+					_, err := normalizeVault(s)
+					return err
+				}),
+		),
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("¿Instalar BBrain con esta configuración?").
+				Affirmative("Sí, instalar").
+				Negative("Cancelar").
+				Value(&confirmed),
+		),
+	)
+
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return o, ErrAborted
+		}
 		return o, err
 	}
-	if o.Agent, err = ask("Agent (claude-code)", def.Agent); err != nil {
-		return o, err
+	if !confirmed {
+		return o, ErrAborted
 	}
-	if o.Scope, err = ask("Scope (user|project)", def.Scope); err != nil {
-		return o, err
-	}
-	if o.Agent != "claude-code" {
-		return o, fmt.Errorf("install: only 'claude-code' is supported, got %q", o.Agent)
-	}
-	if o.Scope != "user" && o.Scope != "project" {
-		return o, fmt.Errorf("install: scope must be 'user' or 'project', got %q", o.Scope)
-	}
+	o.Scope = scope
+	o.Vault = vault
 	return o, nil
 }

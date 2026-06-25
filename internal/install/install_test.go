@@ -155,16 +155,6 @@ func TestPlanInstallUserScopeIsIdempotentViaRemoveThenAdd(t *testing.T) {
 	}
 }
 
-func TestWizardParsesStdin(t *testing.T) {
-	in := strings.NewReader("/my/vault\n\nuser\n") // vault, agent(blank→default), scope
-	def := Options{Vault: "/default", Agent: "claude-code", Scope: "project"}
-	var out strings.Builder
-	got, err := Wizard(in, &out, def)
-	must(t, err)
-	if got.Vault != "/my/vault" || got.Agent != "claude-code" || got.Scope != "user" {
-		t.Fatalf("wizard result = %+v", got)
-	}
-}
 
 func must(t *testing.T, err error) {
 	t.Helper()

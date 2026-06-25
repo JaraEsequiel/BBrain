@@ -32,6 +32,30 @@ func TestSaveThenSearch(t *testing.T) {
 	}
 }
 
+func TestSearchFallsBackToOrWhenAndFindsNothing(t *testing.T) {
+	a := New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{
+		Type: "note", Title: "Juan Jara", Body: "works on fuel-cx",
+		Project: "fuel-cx", Scope: "project",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// No fact contains all of these terms, so strict AND yields nothing. The OR
+	// fallback must still surface the partially-overlapping "Juan Jara" fact —
+	// this is the broad-query miss that returned {"results": null} before.
+	res, err := a.Search("Juan Jara role company team preferences", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 || res[0].Title != "Juan Jara" {
+		t.Fatalf("OR fallback Search = %+v; want the Juan Jara fact", res)
+	}
+}
+
 func TestReindexRebuildsFromDisk(t *testing.T) {
 	a := New(t.TempDir())
 	if err := a.Init(); err != nil {

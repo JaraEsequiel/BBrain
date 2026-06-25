@@ -58,3 +58,40 @@ func TestNewCLIRunnerReadsEnv(t *testing.T) {
 		t.Fatalf("runner = %+v", r)
 	}
 }
+
+// writeEnvFile writes a setup-style <home>/.bbrain/env.sh and returns home.
+func writeEnvFile(t *testing.T, line string) string {
+	t.Helper()
+	home := t.TempDir()
+	dir := filepath.Join(home, ".bbrain")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "env.sh"), []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return home
+}
+
+func TestAgentCLIPrefersEnv(t *testing.T) {
+	t.Setenv("BBRAIN_AGENT_CLI", "claude -p")
+	home := writeEnvFile(t, `export BBRAIN_AGENT_CLI='/should/not/win'`)
+	if got := AgentCLI(home); got != "claude -p" {
+		t.Fatalf("AgentCLI = %q, want env value to win", got)
+	}
+}
+
+func TestAgentCLIFallsBackToEnvFile(t *testing.T) {
+	t.Setenv("BBRAIN_AGENT_CLI", "") // simulate MCP server started without a sourced profile
+	home := writeEnvFile(t, `export BBRAIN_AGENT_CLI='/home/x/.bbrain/agents/claude-code.sh'`)
+	if got := AgentCLI(home); got != "/home/x/.bbrain/agents/claude-code.sh" {
+		t.Fatalf("AgentCLI = %q, want value parsed from env.sh", got)
+	}
+}
+
+func TestAgentCLIEmptyWhenNeither(t *testing.T) {
+	t.Setenv("BBRAIN_AGENT_CLI", "")
+	if got := AgentCLI(t.TempDir()); got != "" {
+		t.Fatalf("AgentCLI = %q, want empty", got)
+	}
+}

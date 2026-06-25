@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -42,6 +43,54 @@ type CLIRunner struct {
 // NewCLIRunner builds a CLIRunner from $BBRAIN_AGENT_CLI with DefaultTimeout.
 func NewCLIRunner() *CLIRunner {
 	return &CLIRunner{Command: os.Getenv("BBRAIN_AGENT_CLI"), Timeout: DefaultTimeout}
+}
+
+// NewCLIRunnerFor builds a CLIRunner whose command is resolved with AgentCLI,
+// so the agent CLI works even when the process inherited no BBRAIN_AGENT_CLI
+// (the common case for an MCP server launched without a sourced shell profile).
+func NewCLIRunnerFor(home string) *CLIRunner {
+	return &CLIRunner{Command: AgentCLI(home), Timeout: DefaultTimeout}
+}
+
+// AgentCLI resolves the agent CLI command line. It prefers the BBRAIN_AGENT_CLI
+// environment variable; when that is empty, it falls back to the value exported
+// in <home>/.bbrain/env.sh — the file `bbrain install` writes on every machine —
+// so the wiki LLM backend survives an environment drop. Returns "" when neither
+// source provides a command.
+func AgentCLI(home string) string {
+	if v := os.Getenv("BBRAIN_AGENT_CLI"); v != "" {
+		return v
+	}
+	return agentCLIFromEnvFile(filepath.Join(home, ".bbrain", "env.sh"))
+}
+
+// agentCLIFromEnvFile parses `export BBRAIN_AGENT_CLI='...'` (as written by
+// setup.EnvExportLine) out of an env.sh. Returns "" if the file is unreadable or
+// has no such line.
+func agentCLIFromEnvFile(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimPrefix(strings.TrimSpace(line), "export ")
+		v, ok := strings.CutPrefix(line, "BBRAIN_AGENT_CLI=")
+		if !ok {
+			continue
+		}
+		return shellSingleUnquote(strings.TrimSpace(v))
+	}
+	return ""
+}
+
+// shellSingleUnquote reverses setup.shellSingleQuote: a single-quoted shell
+// string where an embedded ' is written as '\''. Non-single-quoted input is
+// returned unchanged.
+func shellSingleUnquote(s string) string {
+	if len(s) < 2 || s[0] != '\'' || s[len(s)-1] != '\'' {
+		return s
+	}
+	return strings.ReplaceAll(s[1:len(s)-1], `'\''`, `'`)
 }
 
 // Run shells out to the configured command. The Command is split on whitespace

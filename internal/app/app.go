@@ -31,7 +31,7 @@ type App struct {
 // New builds an App rooted at a brain directory.
 func New(root string) *App {
 	b := brain.New(root)
-	return &App{Store: store.New(b), Brain: b, Runner: llm.NewCLIRunner()}
+	return &App{Store: store.New(b), Brain: b, Runner: llm.NewCLIRunnerFor(b.Root)}
 }
 
 // ensureIndexDir creates the directory that holds the derived index, so the

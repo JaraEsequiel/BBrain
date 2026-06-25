@@ -40,6 +40,17 @@ func TestMergeMCPConfigInsertsAndPreserves(t *testing.T) {
 	if env["BBRAIN_HOME"] != "/home/u/.bbrain/default" {
 		t.Fatalf("BBRAIN_HOME wrong: %v", env)
 	}
+	// args must carry --home so the brain is found even when env is dropped.
+	args := bb["args"].([]any)
+	var gotHome bool
+	for i, a := range args {
+		if a == "--home" && i+1 < len(args) && args[i+1] == "/home/u/.bbrain/default" {
+			gotHome = true
+		}
+	}
+	if !gotHome {
+		t.Fatalf("args missing --home /home/u/.bbrain/default: %v", args)
+	}
 }
 
 func TestMergeMCPConfigEmptyInput(t *testing.T) {

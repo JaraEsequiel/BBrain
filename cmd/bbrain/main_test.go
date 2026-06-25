@@ -486,6 +486,42 @@ func TestEndToEndMCP(t *testing.T) {
 	}
 }
 
+// TestMCPHomeFlag locks in the fix for the silent-null bug: `bbrain mcp --home`
+// must serve the brain at that path even when BBRAIN_HOME points elsewhere (or is
+// unset). Before the flag existed, cmdMCP ignored its args and always fell back to
+// brainRoot(), so a wrong/empty BBRAIN_HOME yielded {"results": null}.
+func TestMCPHomeFlag(t *testing.T) {
+	realHome := t.TempDir()
+	emptyHome := t.TempDir()
+
+	// Seed the real brain via BBRAIN_HOME (save/init resolve only via the env).
+	t.Setenv("BBRAIN_HOME", realHome)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"init"}, &out, &errOut); code != 0 {
+		t.Fatalf("init: %s", errOut.String())
+	}
+	if code := run([]string{"save", "--title", "Juan Jara", "--project", "fuel-cx", "--type", "note", "--body", "works on fuel-cx"}, &out, &errOut); code != 0 {
+		t.Fatalf("save: %s", errOut.String())
+	}
+
+	// Now point BBRAIN_HOME at an empty brain: --home must override the env fallback.
+	t.Setenv("BBRAIN_HOME", emptyHome)
+
+	reqs := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mem_search","arguments":{"query":"Juan Jara"}}}`,
+	}, "\n") + "\n"
+
+	out.Reset()
+	errOut.Reset()
+	if code := runStdin(t, []string{"mcp", "--home", realHome}, reqs, &out, &errOut); code != 0 {
+		t.Fatalf("mcp exit=%d err=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "Juan Jara") {
+		t.Fatalf("mcp --home did not serve the brain at realHome; out=%s", out.String())
+	}
+}
+
 func TestEndToEndContext(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("BBRAIN_HOME", home)

@@ -40,11 +40,14 @@ sys.stdout.write(m.group(1) if m else s)
 }
 
 // MCPEntry is the stdio MCP server entry for bbrain (the shape Claude Code writes).
+// The brain home is passed both as a --home flag and via env: the flag is the
+// reliable channel (Claude Code does not always propagate env to stdio children),
+// and env stays as a belt-and-suspenders fallback for manual `bbrain mcp` runs.
 func MCPEntry(brainHome string) map[string]any {
 	return map[string]any{
 		"type":    "stdio",
 		"command": "bbrain",
-		"args":    []string{"mcp"},
+		"args":    []string{"mcp", "--home", brainHome},
 		"env":     map[string]string{"BBRAIN_HOME": brainHome},
 	}
 }

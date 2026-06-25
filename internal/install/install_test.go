@@ -62,7 +62,8 @@ func TestPlanInstallUserScopeUsesMCPCLI(t *testing.T) {
 	for _, a := range acts {
 		if a.Kind == "mcp-cli" && len(a.Argv) > 2 && a.Argv[2] == "add" {
 			sawAdd = true
-			if strings.Join(a.Argv, " ") != "claude mcp add -s user bbrain -e BBRAIN_HOME="+filepath.Join(o.Vault, "memory")+" -- bbrain mcp" {
+			mem := filepath.Join(o.Vault, "memory")
+			if strings.Join(a.Argv, " ") != "claude mcp add -s user bbrain -e BBRAIN_HOME="+mem+" -- bbrain mcp --home "+mem {
 				t.Fatalf("mcp-cli add argv = %v", a.Argv)
 			}
 		}

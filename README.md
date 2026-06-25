@@ -49,6 +49,31 @@ cd BBrain
 go build -o bbrain ./cmd/bbrain
 ```
 
+### Update an existing install
+
+The installer is idempotent — updating is re-running it. Your brain (the `.md`
+files under `$BBRAIN_HOME`) is never touched; only the binary is replaced.
+
+```sh
+# 1. Replace the binary with the latest release (overwrites in place)
+curl -fsSL https://raw.githubusercontent.com/JaraEsequiel/BBrain/master/install.sh | sh
+bbrain version          # confirm the new version
+
+# 2. Refresh the Claude Code integration so the MCP config is regenerated
+bbrain install
+
+# 3. Restart Claude Code so it picks up the new binary and config
+```
+
+Step 2 matters as much as step 1: it regenerates the MCP entry to pass the brain
+home as `bbrain mcp --home <path>` instead of relying solely on the `env` block,
+which some Claude Code setups don't propagate to the stdio child. Skipping it can
+leave tools silently returning empty even after the binary is updated.
+
+> With Go installs, update with `go install github.com/JaraEsequiel/BBrain/cmd/bbrain@latest`,
+> then run steps 2–3. Pin a specific release with `BBRAIN_VERSION=v0.1.2` on the
+> `install.sh` one-liner.
+
 ## Quickstart
 
 ```sh

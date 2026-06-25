@@ -172,3 +172,46 @@ func must(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+
+func TestNormalizeVault(t *testing.T) {
+	home, err := os.UserHomeDir()
+	must(t, err)
+	cwd, err := os.Getwd()
+	must(t, err)
+	cases := []struct{ in, want string }{
+		{"~", home},
+		{"~/brain", filepath.Join(home, "brain")},
+		{"/abs/vault", "/abs/vault"},
+		{"rel/vault", filepath.Join(cwd, "rel", "vault")},
+		{"  ~/spaced  ", filepath.Join(home, "spaced")},
+	}
+	for _, c := range cases {
+		got, err := normalizeVault(c.in)
+		must(t, err)
+		if got != c.want {
+			t.Errorf("normalizeVault(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	if _, err := normalizeVault("   "); err == nil {
+		t.Error("normalizeVault(empty) should error")
+	}
+}
+
+func TestPlanInstallNormalizesVault(t *testing.T) {
+	o := projOpts(t)
+	o.Vault = "relative/vault" // not absolute: must be normalized before baking into actions
+	cwd, err := os.Getwd()
+	must(t, err)
+	wantMem := filepath.Join(cwd, "relative", "vault", "memory")
+	acts, err := PlanInstall(o)
+	must(t, err)
+	var found bool
+	for _, a := range acts {
+		if a.Kind == "mkbrain" && a.Path == wantMem {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("PlanInstall did not normalize relative vault into action paths (want mkbrain %s)", wantMem)
+	}
+}

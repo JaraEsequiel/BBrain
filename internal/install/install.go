@@ -77,9 +77,38 @@ func readMaybe(path string) ([]byte, error) {
 	return b, nil
 }
 
+// normalizeVault expands a leading ~ to the user's home directory and resolves
+// the path to an absolute, cleaned form. Without this, a relative path or a
+// literal "~" chosen in the wizard gets baked verbatim into env.sh, .mcp.json,
+// and CLAUDE.md — breaking when Claude Code launches the MCP server from a
+// different working directory. Idempotent on already-absolute paths.
+func normalizeVault(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("install: vault path is empty")
+	}
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("install: cannot expand ~: %w", err)
+		}
+		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("install: resolve vault path %q: %w", path, err)
+	}
+	return abs, nil
+}
+
 // PlanInstall computes the ordered actions for opts (pure: reads existing files to
 // compute merges but writes nothing).
 func PlanInstall(o Options) ([]Action, error) {
+	nv, err := normalizeVault(o.Vault)
+	if err != nil {
+		return nil, err
+	}
+	o.Vault = nv
 	mem := o.memoryDir()
 	adapter := o.adapterPath()
 	var acts []Action
@@ -151,6 +180,11 @@ func PlanInstall(o Options) ([]Action, error) {
 
 // PlanUninstall computes the reversal actions for opts.
 func PlanUninstall(o Options) ([]Action, error) {
+	nv, err := normalizeVault(o.Vault)
+	if err != nil {
+		return nil, err
+	}
+	o.Vault = nv
 	var acts []Action
 	// integration CLAUDE.md: strip the managed block (only if the file actually contains it)
 	if doc, err := os.ReadFile(o.claudeMDPath()); err == nil && strings.Contains(string(doc), setup.BlockBegin) {

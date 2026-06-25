@@ -3,3 +3,6 @@
 
 # Release artifacts
 /dist/
+
+# Design docs (specs/plans/research) are kept local, not tracked
+/docs/

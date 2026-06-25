@@ -369,7 +369,17 @@ func cmdWikiLint(args []string, stdout, stderr io.Writer) int {
 }
 
 func cmdMCP(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	a := app.New(brainRoot())
+	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	home := fs.String("home", "", "brain home (default: resolved brain root)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	root := *home
+	if root == "" {
+		root = brainRoot()
+	}
+	a := app.New(root)
 	srv := &mcp.Server{App: a, Tools: mcp.DefaultTools()}
 	if err := srv.Serve(context.Background(), stdin, stdout); err != nil {
 		fmt.Fprintf(stderr, "mcp: %v\n", err)

@@ -110,7 +110,7 @@ func PlanInstall(o Options) ([]Action, error) {
 			Action{Kind: "mcp-cli", Summary: "drop any prior bbrain MCP (user)", IgnoreError: true,
 				Argv: []string{"claude", "mcp", "remove", "-s", "user", "bbrain"}},
 			Action{Kind: "mcp-cli", Summary: "register bbrain MCP (user scope)",
-				Argv: []string{"claude", "mcp", "add", "-s", "user", "bbrain", "-e", "BBRAIN_HOME=" + mem, "--", "bbrain", "mcp"}})
+				Argv: []string{"claude", "mcp", "add", "-s", "user", "bbrain", "-e", "BBRAIN_HOME=" + mem, "--", "bbrain", "mcp", "--home", mem}})
 	} else {
 		mcpPath := filepath.Join(o.ProjectDir, ".mcp.json")
 		existing, err := readMaybe(mcpPath)

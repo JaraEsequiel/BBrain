@@ -322,6 +322,25 @@ func TestBuildBatchesBelowRunnerLimit(t *testing.T) {
 	}
 }
 
+func TestBuildDefaultBatchSizeIsTen(t *testing.T) {
+	dir := t.TempDir()
+	// 11 facts with BatchSize:0 (=> defaultBatchSize) must split into 2 batches.
+	// This fails against the old default of 30 (which would be a single batch).
+	var facts []fact.Fact
+	for i := 0; i < 11; i++ {
+		facts = append(facts, fact.Fact{ID: "f" + strconv.Itoa(i), Title: "T", Scope: "global", Body: "b"})
+	}
+	fr := &batchAwareRunner{maxFacts: 11} // no per-prompt limit; we only count batches
+	_, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Categories: DefaultCategories,
+		Runner: fr, Now: fixedNow, // BatchSize omitted => defaultBatchSize
+	})
+	must(t, err)
+	if fr.batches != 2 {
+		t.Fatalf("batches = %d, want 2 (default batch size 10 over 11 facts)", fr.batches)
+	}
+}
+
 func TestBuildBatchFailureIsVisible(t *testing.T) {
 	dir := t.TempDir()
 	var facts []fact.Fact

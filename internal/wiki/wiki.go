@@ -244,14 +244,15 @@ func AppendLog(wikiDir, entry string) error {
 	return err
 }
 
-// defaultBatchSize bounds how many facts go into one LLM call. Measured: an
-// average fact contributes ~1.5 KB to BuildPrompt (its body plus a one-line
-// header; the raw .md files average ~1.7 KB but frontmatter/timestamps are
-// dropped), i.e. ~375 tokens/fact. 30 facts => ~11 KB / ~2.8k input tokens,
-// which distils comfortably inside the runner's 120s budget. The monolithic
-// call this fixes was ~146 facts / ~55 KB / ~14k tokens and timed out. 30 sits
-// mid-range of the safe 25-40 band with margin for longer-than-average facts.
-const defaultBatchSize = 30
+// defaultBatchSize bounds how many facts go into one LLM call. Cost is
+// dominated not by input size but by the agentic backend's fixed per-call
+// overhead (~50s before it emits a token) plus the time to generate the output
+// pages — so the lever that matters is bounding OUTPUT per call, not squeezing
+// input. Measured against the real vault: 30 full facts per batch timed out at
+// the runner's budget; 5 facts distilled in ~42s, 10 in ~60s. 10 keeps each
+// call's output small enough to finish well inside DistillTimeout (300s) while
+// still amortising the fixed overhead over a useful chunk of facts.
+const defaultBatchSize = 10
 
 // BuildOptions configures one wiki build.
 type BuildOptions struct {

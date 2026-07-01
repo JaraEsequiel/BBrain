@@ -33,6 +33,14 @@ var (
 // DefaultTimeout bounds a single CLI call.
 const DefaultTimeout = 120 * time.Second
 
+// DistillTimeout bounds a single wiki distillation call. Wiki build/link drive
+// an agentic backend (e.g. `claude -p`) whose per-call latency floor is ~50s of
+// fixed overhead before it emits a token; distilling a batch of facts into
+// several markdown pages then adds seconds of generation on top. The 120s
+// interactive DefaultTimeout is too tight for that — batches timed out at 120s
+// against a real vault — so distillation gets a larger, non-interactive budget.
+const DistillTimeout = 300 * time.Second
+
 // CLIRunner runs Command (default: $BBRAIN_AGENT_CLI), piping the prompt to the
 // process's stdin and reading the response from its stdout.
 type CLIRunner struct {
@@ -50,6 +58,14 @@ func NewCLIRunner() *CLIRunner {
 // (the common case for an MCP server launched without a sourced shell profile).
 func NewCLIRunnerFor(home string) *CLIRunner {
 	return &CLIRunner{Command: AgentCLI(home), Timeout: DefaultTimeout}
+}
+
+// NewCLIRunnerForTimeout is NewCLIRunnerFor with a caller-chosen timeout — used
+// for long, non-interactive operations like wiki distillation (DistillTimeout).
+func NewCLIRunnerForTimeout(home string, d time.Duration) *CLIRunner {
+	r := NewCLIRunnerFor(home)
+	r.Timeout = d
+	return r
 }
 
 // AgentCLI resolves the agent CLI command line. It prefers the BBRAIN_AGENT_CLI

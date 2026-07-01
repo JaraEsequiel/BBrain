@@ -187,6 +187,42 @@ func TestWikiBuildAllBatchesSkippedExitsOne(t *testing.T) {
 	}
 }
 
+// A backend that emits a well-formed page citing a fact id that does not exist
+// (the LLM hallucinated a source): the page fails validation and is dropped, not
+// aborted. With only that page, nothing is written => exit 1 with an invalid-page
+// warning on stderr. Pins the CLI side of the skip-invalid-page contract.
+func TestWikiBuildInvalidPageDroppedExitsOne(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("BBRAIN_HOME", home)
+	var out, errOut bytes.Buffer
+
+	if code := run([]string{"init"}, &out, &errOut); code != 0 {
+		t.Fatalf("init: %s", errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"save", "--title", "Use JWT", "--project", "shopapp",
+		"--type", "decision", "--body", "jwt"}, &out, &errOut); code != 0 {
+		t.Fatalf("save: %s", errOut.String())
+	}
+	// Valid JSON, but the page cites a fact id that was never saved.
+	jsonOut := `{"pages":[{"slug":"ghost","category":"decisions","title":"Ghost","sources":["hallucinated-id"],"body":"b","change_reason":"x"}]}`
+	script := filepath.Join(t.TempDir(), "agent.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat >/dev/null\ncat <<'JSON'\n"+jsonOut+"\nJSON\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BBRAIN_AGENT_CLI", script)
+
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"wiki", "build"}, &out, &errOut); code != 1 {
+		t.Fatalf("exit = %d, want 1 (nothing written, page dropped); stderr=%q", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "invalid page") || !strings.Contains(errOut.String(), "re-run") {
+		t.Fatalf("stderr should warn about the dropped invalid page, got: %q", errOut.String())
+	}
+}
+
 func TestWikiBuildUnconfiguredFails(t *testing.T) {
 	t.Setenv("BBRAIN_HOME", t.TempDir())
 	t.Setenv("BBRAIN_AGENT_CLI", "")

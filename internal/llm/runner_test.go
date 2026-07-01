@@ -89,6 +89,20 @@ func TestAgentCLIFallsBackToEnvFile(t *testing.T) {
 	}
 }
 
+func TestNewCLIRunnerForTimeout(t *testing.T) {
+	t.Setenv("BBRAIN_AGENT_CLI", "") // force resolution through env.sh, same as NewCLIRunnerFor
+	home := writeEnvFile(t, `export BBRAIN_AGENT_CLI='/home/x/.bbrain/agents/claude-code.sh'`)
+	d := 300 * time.Second
+	r := NewCLIRunnerForTimeout(home, d)
+	if r.Timeout != d {
+		t.Fatalf("Timeout = %v, want %v", r.Timeout, d)
+	}
+	// Command must resolve identically to NewCLIRunnerFor (same AgentCLI(home)).
+	if want := NewCLIRunnerFor(home).Command; r.Command != want {
+		t.Fatalf("Command = %q, want %q (same as NewCLIRunnerFor)", r.Command, want)
+	}
+}
+
 func TestAgentCLIEmptyWhenNeither(t *testing.T) {
 	t.Setenv("BBRAIN_AGENT_CLI", "")
 	if got := AgentCLI(t.TempDir()); got != "" {

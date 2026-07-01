@@ -254,6 +254,14 @@ func AppendLog(wikiDir, entry string) error {
 // still amortising the fixed overhead over a useful chunk of facts.
 const defaultBatchSize = 10
 
+// maxBatchAttempts caps how many times one batch's LLM call (Run + ParseResponse)
+// is retried before the build gives up. The agentic backend is non-deterministic:
+// a transient malformed-JSON response for one batch must not discard the batches
+// that already succeeded, and a fresh call almost always parses. 3 attempts makes
+// an occasional flake nearly impossible while still surfacing a genuinely broken
+// batch (all attempts fail => build fails, preserving validate-all-before-write).
+const maxBatchAttempts = 3
+
 // BuildOptions configures one wiki build.
 type BuildOptions struct {
 	WikiDir    string
@@ -376,13 +384,25 @@ func Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
 	var keys []string
 	for i, batch := range batches {
 		// existing is read once and passed to every batch so each can reconcile.
-		stdout, err := opts.Runner.Run(ctx, BuildPrompt(batch, existing, opts.Categories))
-		if err != nil {
-			return BuildResult{}, fmt.Errorf("wiki: batch %d/%d failed: %w", i+1, len(batches), err)
+		prompt := BuildPrompt(batch, existing, opts.Categories)
+		// Retry the batch (Run + ParseResponse) on transient failure: the backend
+		// is non-deterministic, so a flaky call typically parses on retry. No
+		// backoff (YAGNI: the backend already takes ~60s/call).
+		var pages []Page
+		var lastErr error
+		for attempt := 1; attempt <= maxBatchAttempts; attempt++ {
+			stdout, err := opts.Runner.Run(ctx, prompt)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			pages, lastErr = ParseResponse(stdout)
+			if lastErr == nil {
+				break
+			}
 		}
-		pages, err := ParseResponse(stdout)
-		if err != nil {
-			return BuildResult{}, fmt.Errorf("wiki: batch %d/%d parse failed: %w", i+1, len(batches), err)
+		if lastErr != nil {
+			return BuildResult{}, fmt.Errorf("wiki: batch %d/%d failed after %d attempts: %w", i+1, len(batches), maxBatchAttempts, lastErr)
 		}
 		for _, p := range pages {
 			p := p

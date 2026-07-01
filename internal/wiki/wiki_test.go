@@ -255,6 +255,173 @@ func TestBuildPromptContainsFactsCategoriesAndSchema(t *testing.T) {
 	}
 }
 
+// countFactHeaders counts "### <id>" fact markers in a BuildPrompt output. It
+// only counts the facts section (before "## Existing wiki pages") so existing
+// page "### relpath" headers don't inflate the count.
+func countFactHeaders(prompt string) int {
+	facts := prompt
+	if i := strings.Index(prompt, "## Existing wiki pages"); i >= 0 {
+		facts = prompt[:i]
+	}
+	n := 0
+	for _, line := range strings.Split(facts, "\n") {
+		if strings.HasPrefix(line, "### ") {
+			n++
+		}
+	}
+	return n
+}
+
+// batchAwareRunner fails if any single prompt carries more than MaxFacts fact
+// headers, proving Build() no longer makes a monolithic call. It returns a
+// distinct page per batch (slug derived from the batch's first fact id) so every
+// batch's output is validatable.
+type batchAwareRunner struct {
+	maxFacts int
+	batches  int
+}
+
+func (r *batchAwareRunner) Run(ctx context.Context, prompt string) (string, error) {
+	n := countFactHeaders(prompt)
+	if n > r.maxFacts {
+		return "", errors.New("prompt too large: " + strconv.Itoa(n) + " facts > " + strconv.Itoa(r.maxFacts))
+	}
+	r.batches++
+	// Echo one page per fact in this batch so each fact becomes a source.
+	var pages []string
+	for _, line := range strings.Split(prompt, "\n") {
+		id, ok := strings.CutPrefix(line, "### ")
+		if !ok || strings.Contains(id, "/") { // skip existing-page headers (relpaths)
+			continue
+		}
+		pages = append(pages, `{"slug":"p-`+id+`","category":"concepts","title":"T","sources":["`+id+`"],"body":"b","change_reason":"x"}`)
+	}
+	return `{"pages":[` + strings.Join(pages, ",") + `]}`, nil
+}
+
+func TestBuildBatchesBelowRunnerLimit(t *testing.T) {
+	dir := t.TempDir()
+	var facts []fact.Fact
+	for i := 0; i < 50; i++ {
+		facts = append(facts, fact.Fact{
+			ID: "f" + strconv.Itoa(i), Title: "T", Scope: "global", Body: "b",
+		})
+	}
+	// Runner refuses any prompt with >10 facts; with BatchSize=10 Build must split.
+	fr := &batchAwareRunner{maxFacts: 10}
+	res, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Categories: DefaultCategories,
+		Runner: fr, Now: fixedNow, BatchSize: 10,
+	})
+	must(t, err)
+	if fr.batches != 5 {
+		t.Fatalf("batches = %d, want 5", fr.batches)
+	}
+	if len(res.Written) != 50 {
+		t.Fatalf("written = %d, want 50", len(res.Written))
+	}
+}
+
+func TestBuildBatchFailureIsVisible(t *testing.T) {
+	dir := t.TempDir()
+	var facts []fact.Fact
+	for i := 0; i < 30; i++ {
+		facts = append(facts, fact.Fact{ID: "f" + strconv.Itoa(i), Title: "T", Scope: "global", Body: "b"})
+	}
+	// maxFacts smaller than BatchSize => every batch fails; error must name the batch/total.
+	fr := &batchAwareRunner{maxFacts: 5}
+	_, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Categories: DefaultCategories,
+		Runner: fr, Now: fixedNow, BatchSize: 10,
+	})
+	if err == nil {
+		t.Fatal("Build should surface a failing batch")
+	}
+	if !strings.Contains(err.Error(), "batch") {
+		t.Fatalf("error should identify the batch, got: %v", err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("Build wrote files despite failing batch: %v", entries)
+	}
+}
+
+// scriptedRunner returns a queued response per successive Run call, so a test can
+// script what each batch emits.
+type scriptedRunner struct {
+	outs []string
+	i    int
+}
+
+func (r *scriptedRunner) Run(ctx context.Context, prompt string) (string, error) {
+	out := r.outs[r.i]
+	r.i++
+	return out, nil
+}
+
+func TestBuildMergesPagesSameKey(t *testing.T) {
+	dir := t.TempDir()
+	// Two facts, same project => same bucket. Two batches (BatchSize=1) each emit
+	// a page with the same (bucket, category, slug) but partially-overlapping sources.
+	facts := []fact.Fact{
+		{ID: "a", Title: "A", Scope: "project", Project: "shopapp", Body: "ba"},
+		{ID: "b", Title: "B", Scope: "project", Project: "shopapp", Body: "bb"},
+	}
+	fr := &scriptedRunner{outs: []string{
+		`{"pages":[{"slug":"auth","category":"decisions","title":"Auth","sources":["a"],"body":"BODY-1","change_reason":"created"}]}`,
+		`{"pages":[{"slug":"auth","category":"decisions","title":"Auth-later","sources":["a","b"],"body":"BODY-2","change_reason":"updated"}]}`,
+	}}
+	res, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Categories: DefaultCategories,
+		Runner: fr, Now: fixedNow, BatchSize: 1,
+	})
+	must(t, err)
+	if len(res.Written) != 1 {
+		t.Fatalf("written = %+v, want a single merged page", res.Written)
+	}
+	rel := "projects/shopapp/decisions/auth.md"
+	b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+	must(t, err)
+	content := string(b)
+	meta, err := ParsePageMeta(content)
+	must(t, err)
+	// Sources: union with dedup, first-seen order => [a, b].
+	if len(meta.Sources) != 2 || meta.Sources[0] != "a" || meta.Sources[1] != "b" {
+		t.Fatalf("merged sources = %v, want [a b]", meta.Sources)
+	}
+	// Title from first batch that emitted the key.
+	if meta.Title != "Auth" {
+		t.Fatalf("merged title = %q, want Auth", meta.Title)
+	}
+	// Body: both bodies preserved (append with separator), deterministic order.
+	if !strings.Contains(content, "BODY-1") || !strings.Contains(content, "BODY-2") {
+		t.Fatalf("merged body lost information:\n%s", content)
+	}
+	if strings.Index(content, "BODY-1") > strings.Index(content, "BODY-2") {
+		t.Fatalf("merged body order not deterministic (batch order):\n%s", content)
+	}
+}
+
+func TestBuildDoesNotMergeDifferentBuckets(t *testing.T) {
+	dir := t.TempDir()
+	// Same slug+category, but different projects => different buckets => two files.
+	facts := []fact.Fact{
+		{ID: "a", Title: "A", Scope: "project", Project: "shopapp", Body: "ba"},
+		{ID: "b", Title: "B", Scope: "project", Project: "datacli", Body: "bb"},
+	}
+	fr := &scriptedRunner{outs: []string{
+		`{"pages":[{"slug":"auth","category":"decisions","title":"Auth","sources":["a"],"body":"BODY-A","change_reason":"x"}]}`,
+		`{"pages":[{"slug":"auth","category":"decisions","title":"Auth","sources":["b"],"body":"BODY-B","change_reason":"x"}]}`,
+	}}
+	res, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Categories: DefaultCategories,
+		Runner: fr, Now: fixedNow, BatchSize: 1,
+	})
+	must(t, err)
+	if len(res.Written) != 2 {
+		t.Fatalf("written = %+v, want two files (distinct buckets)", res.Written)
+	}
+}
+
 func writePageRaw(t *testing.T, dir, rel, content string) {
 	t.Helper()
 	p := filepath.Join(dir, filepath.FromSlash(rel))

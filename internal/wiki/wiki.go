@@ -244,14 +244,24 @@ func AppendLog(wikiDir, entry string) error {
 	return err
 }
 
+// defaultBatchSize bounds how many facts go into one LLM call. Measured: an
+// average fact contributes ~1.5 KB to BuildPrompt (its body plus a one-line
+// header; the raw .md files average ~1.7 KB but frontmatter/timestamps are
+// dropped), i.e. ~375 tokens/fact. 30 facts => ~11 KB / ~2.8k input tokens,
+// which distils comfortably inside the runner's 120s budget. The monolithic
+// call this fixes was ~146 facts / ~55 KB / ~14k tokens and timed out. 30 sits
+// mid-range of the safe 25-40 band with margin for longer-than-average facts.
+const defaultBatchSize = 30
+
 // BuildOptions configures one wiki build.
 type BuildOptions struct {
 	WikiDir    string
-	Facts      []fact.Fact   // already filtered by project/scope
-	Categories []string      // active category vocabulary
+	Facts      []fact.Fact // already filtered by project/scope
+	Categories []string    // active category vocabulary
 	Runner     llm.Runner
 	Now        func() time.Time
 	DryRun     bool
+	BatchSize  int // facts per LLM call; 0 => defaultBatchSize
 }
 
 // BuildResult reports what a build wrote.
@@ -294,6 +304,51 @@ func BuildPrompt(facts []fact.Fact, existing []pageOnDisk, categories []string) 
 	return sb.String()
 }
 
+// chunkFacts splits facts into consecutive slices of at most size. A nil/empty
+// input yields one empty batch so a fact-less build still runs the reconcile
+// pass (matching the old single-call behaviour on an empty vault).
+func chunkFacts(facts []fact.Fact, size int) [][]fact.Fact {
+	if len(facts) == 0 {
+		return [][]fact.Fact{nil}
+	}
+	var out [][]fact.Fact
+	for i := 0; i < len(facts); i += size {
+		end := i + size
+		if end > len(facts) {
+			end = len(facts)
+		}
+		out = append(out, facts[i:end])
+	}
+	return out
+}
+
+// mergePage folds a later batch's page (add) into an earlier one (dst) that
+// resolved to the same on-disk key. Sources: union with dedup, first-seen order.
+// Body: both bodies preserved, appended in batch order with a separator. Title
+// and Category keep the first batch's value; ChangeReason is joined.
+func mergePage(dst *Page, add Page) {
+	seen := map[string]bool{}
+	for _, s := range dst.Sources {
+		seen[s] = true
+	}
+	for _, s := range add.Sources {
+		if !seen[s] {
+			seen[s] = true
+			dst.Sources = append(dst.Sources, s)
+		}
+	}
+	if strings.TrimSpace(add.Body) != "" {
+		dst.Body = strings.TrimRight(dst.Body, "\n") + "\n\n" + strings.TrimLeft(add.Body, "\n")
+	}
+	if r := strings.TrimSpace(add.ChangeReason); r != "" {
+		if strings.TrimSpace(dst.ChangeReason) == "" {
+			dst.ChangeReason = r
+		} else {
+			dst.ChangeReason += "; " + r
+		}
+	}
+}
+
 // Build runs one wiki build: prompt the LLM, validate every page, then write
 // pages, regenerate the index, and append the log. On any validation error
 // nothing is written.
@@ -306,13 +361,42 @@ func Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
 	if err != nil {
 		return BuildResult{}, err
 	}
-	stdout, err := opts.Runner.Run(ctx, BuildPrompt(opts.Facts, existing, opts.Categories))
-	if err != nil {
-		return BuildResult{}, err
+
+	batchSize := opts.BatchSize
+	if batchSize <= 0 {
+		batchSize = defaultBatchSize
 	}
-	pages, err := ParseResponse(stdout)
-	if err != nil {
-		return BuildResult{}, err
+	batches := chunkFacts(opts.Facts, batchSize)
+
+	// Merge pages across batches. Two pages collide only on the same on-disk key
+	// (bucket, category, slug); bucket depends on byID, built above. Order is
+	// preserved by keys so writes and the log stay deterministic.
+	merged := map[string]*Page{}
+	var keys []string
+	for i, batch := range batches {
+		// existing is read once and passed to every batch so each can reconcile.
+		stdout, err := opts.Runner.Run(ctx, BuildPrompt(batch, existing, opts.Categories))
+		if err != nil {
+			return BuildResult{}, fmt.Errorf("wiki: batch %d/%d failed: %w", i+1, len(batches), err)
+		}
+		pages, err := ParseResponse(stdout)
+		if err != nil {
+			return BuildResult{}, fmt.Errorf("wiki: batch %d/%d parse failed: %w", i+1, len(batches), err)
+		}
+		for _, p := range pages {
+			p := p
+			key := DeriveBucket(p.Sources, byID) + "\x00" + p.Category + "\x00" + p.Slug
+			if cur, ok := merged[key]; ok {
+				mergePage(cur, p)
+				continue
+			}
+			merged[key] = &p
+			keys = append(keys, key)
+		}
+	}
+	pages := make([]Page, 0, len(keys))
+	for _, k := range keys {
+		pages = append(pages, *merged[k])
 	}
 	valid := map[string]bool{}
 	for _, c := range opts.Categories {

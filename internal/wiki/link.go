@@ -42,10 +42,23 @@ type Edge struct {
 	Why      string
 }
 
+// FailedLink records a source fact whose per-fact LLM linking (Run +
+// ParseLinkResponse + ValidateProposals) exhausted maxBatchAttempts and was
+// skipped so the rest of the link run could proceed. Its links are not written
+// this run; they are recovered on the next link (WikiLink is idempotent —
+// Candidates already excludes already-linked facts). This is content-level
+// degradation (the backend produced bad output for THIS fact), distinct from
+// infrastructure failures (candidate/store IO) which still abort the run.
+type FailedLink struct {
+	FactID string
+	Err    string // last error that caused the fact to be given up
+}
+
 // LinkResult reports what a wiki link run wrote.
 type LinkResult struct {
 	Written []Edge
-	Skipped int
+	Skipped int          // links already present, not re-written (idempotency)
+	Failed  []FailedLink // facts dropped after exhausting retries (graceful degradation)
 	DryRun  bool
 }
 
@@ -128,32 +141,52 @@ func ValidateProposals(src fact.Fact, props []ProposedLink, candidateIDs map[str
 
 // Link runs the per-fact linking pass: for each fact with candidates, prompt the
 // LLM, parse, and validate. It writes nothing (writes go through the app layer).
-// Any parse/validation failure aborts the whole run.
-func Link(ctx context.Context, opts LinkOptions) ([]FactProposals, error) {
+//
+// Same skip-on-exhaust posture as Build: the per-fact operation (Run +
+// ParseLinkResponse + ValidateProposals) is retried up to maxBatchAttempts on
+// any error — the agentic backend is non-deterministic, so a flaky call almost
+// always parses/validates on retry (no backoff; the backend already takes
+// ~60s/call). A fact that exhausts its retries is NOT fatal: it is dropped,
+// recorded in the returned failed list, and the loop moves on so a single flaky
+// fact can't discard every other fact's links. Its links are recovered on the
+// next run (WikiLink is idempotent).
+func Link(ctx context.Context, opts LinkOptions) ([]FactProposals, []FailedLink, error) {
 	var out []FactProposals
+	var failed []FailedLink
 	for _, f := range opts.Facts {
 		cands := opts.Candidates[f.ID]
 		if len(cands) == 0 {
-			continue // nothing to link against; skip the LLM call
+			continue // nothing to link against; skip the LLM call (not a failure)
 		}
 		candIDs := make(map[string]bool, len(cands))
 		for _, c := range cands {
 			candIDs[c.ID] = true
 		}
-		stdout, err := opts.Runner.Run(ctx, BuildLinkPrompt(f, cands, fact.Relations))
-		if err != nil {
-			return nil, err
+		prompt := BuildLinkPrompt(f, cands, fact.Relations)
+		var props []ProposedLink
+		var lastErr error
+		for attempt := 1; attempt <= maxBatchAttempts; attempt++ {
+			stdout, err := opts.Runner.Run(ctx, prompt)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			props, lastErr = ParseLinkResponse(stdout)
+			if lastErr != nil {
+				continue
+			}
+			lastErr = ValidateProposals(f, props, candIDs)
+			if lastErr == nil {
+				break
+			}
 		}
-		props, err := ParseLinkResponse(stdout)
-		if err != nil {
-			return nil, err
-		}
-		if err := ValidateProposals(f, props, candIDs); err != nil {
-			return nil, err
+		if lastErr != nil {
+			failed = append(failed, FailedLink{FactID: f.ID, Err: lastErr.Error()})
+			continue
 		}
 		if len(props) > 0 {
 			out = append(out, FactProposals{Src: f.ID, Links: props})
 		}
 	}
-	return out, nil
+	return out, failed, nil
 }

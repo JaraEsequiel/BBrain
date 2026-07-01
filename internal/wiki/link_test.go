@@ -84,8 +84,11 @@ func TestLinkLoopSkipsFactsWithNoCandidatesAndValidates(t *testing.T) {
 		},
 		Runner: fr,
 	}
-	out, err := Link(context.Background(), opts)
+	out, failed, err := Link(context.Background(), opts)
 	must(t, err)
+	if len(failed) != 0 {
+		t.Fatalf("unexpected failed: %+v", failed)
+	}
 	if len(out) != 1 || out[0].Src != "f-src" || len(out[0].Links) != 1 || out[0].Links[0].Dst != "f-cand" {
 		t.Fatalf("proposals = %+v", out)
 	}
@@ -94,20 +97,132 @@ func TestLinkLoopSkipsFactsWithNoCandidatesAndValidates(t *testing.T) {
 	}
 }
 
-func TestLinkLoopAbortsOnInvalidProposal(t *testing.T) {
+// A fact whose proposal never validates (non-candidate dst on every attempt) is
+// dropped after exhausting retries and reported in the failed list, WITHOUT
+// aborting the run or returning a Go error. Replaces the old fail-fast
+// expectation: content-level badness for one fact is now graceful degradation,
+// not a hard stop (mirrors Build's skip-on-exhaust for a bad batch).
+func TestLinkLoopSkipsFactThatNeverValidates(t *testing.T) {
 	facts := []fact.Fact{{ID: "f-src", Title: "JWT", Project: "p", Body: "a"}}
-	// Runner returns a dst that is not in f-src's candidate set -> validation aborts.
 	fr := &staticRunner{out: `{"links":[{"dst":"not-a-candidate","relation":"relates","why":"x"}]}`}
 	opts := LinkOptions{
 		Facts:      facts,
 		Candidates: map[string][]Candidate{"f-src": {{ID: "f-cand"}}},
 		Runner:     fr,
 	}
-	if _, err := Link(context.Background(), opts); err == nil {
-		t.Fatal("Link should abort on non-candidate dst")
+	out, failed, err := Link(context.Background(), opts)
+	must(t, err) // no Go error: the fact is skipped, not fatal
+	if len(out) != 0 {
+		t.Fatalf("want no proposals, got %+v", out)
+	}
+	if len(failed) != 1 || failed[0].FactID != "f-src" {
+		t.Fatalf("want f-src reported as failed, got %+v", failed)
+	}
+	if fr.calls != maxBatchAttempts { // retried up to the cap before giving up
+		t.Fatalf("runner calls = %d, want %d", fr.calls, maxBatchAttempts)
 	}
 }
 
-type staticRunner struct{ out string }
+// A fact whose first attempt is malformed but whose retry is valid recovers: its
+// links are produced and the runner is called twice for that fact. Fails against
+// the old fail-fast Link (one malformed response aborted everything).
+func TestLinkLoopRetriesTransientFailure(t *testing.T) {
+	fr := &flakyLinkRunner{good: `{"links":[{"dst":"f-cand","relation":"relates","why":"both jwt"}]}`}
+	opts := LinkOptions{
+		Facts:      []fact.Fact{{ID: "f-src", Title: "JWT", Project: "p", Body: "a"}},
+		Candidates: map[string][]Candidate{"f-src": {{ID: "f-cand"}}},
+		Runner:     fr,
+	}
+	out, failed, err := Link(context.Background(), opts)
+	must(t, err)
+	if len(failed) != 0 {
+		t.Fatalf("unexpected failed: %+v", failed)
+	}
+	if len(out) != 1 || out[0].Src != "f-src" || len(out[0].Links) != 1 || out[0].Links[0].Dst != "f-cand" {
+		t.Fatalf("proposals = %+v", out)
+	}
+	if fr.calls != 2 { // 1st malformed, 2nd valid
+		t.Fatalf("runner calls = %d, want 2", fr.calls)
+	}
+}
 
-func (s *staticRunner) Run(ctx context.Context, prompt string) (string, error) { return s.out, nil }
+// One always-failing fact plus one healthy fact: the run COMPLETES, the good
+// fact's links are produced, and the bad fact is reported in failed — no Go
+// error, no all-or-nothing abort.
+func TestLinkLoopBadFactDoesNotSinkGoodFact(t *testing.T) {
+	fr := &perFactLinkRunner{badSrc: "f-bad", goodSrc: "f-good", goodDst: "f-cand"}
+	opts := LinkOptions{
+		Facts: []fact.Fact{{ID: "f-bad", Body: "a"}, {ID: "f-good", Body: "b"}},
+		Candidates: map[string][]Candidate{
+			"f-bad":  {{ID: "f-cand"}},
+			"f-good": {{ID: "f-cand"}},
+		},
+		Runner: fr,
+	}
+	out, failed, err := Link(context.Background(), opts)
+	must(t, err)
+	if len(out) != 1 || out[0].Src != "f-good" || out[0].Links[0].Dst != "f-cand" {
+		t.Fatalf("want only f-good's links, got %+v", out)
+	}
+	if len(failed) != 1 || failed[0].FactID != "f-bad" {
+		t.Fatalf("want f-bad reported, got %+v", failed)
+	}
+}
+
+// Every fact fails: 0 proposals, all reported, still no Go error.
+func TestLinkLoopAllFactsFail(t *testing.T) {
+	fr := &staticRunner{out: "not json"}
+	opts := LinkOptions{
+		Facts: []fact.Fact{{ID: "f1", Body: "a"}, {ID: "f2", Body: "b"}},
+		Candidates: map[string][]Candidate{
+			"f1": {{ID: "c1"}},
+			"f2": {{ID: "c2"}},
+		},
+		Runner: fr,
+	}
+	out, failed, err := Link(context.Background(), opts)
+	must(t, err)
+	if len(out) != 0 {
+		t.Fatalf("want no proposals, got %+v", out)
+	}
+	if len(failed) != 2 {
+		t.Fatalf("want both facts reported, got %+v", failed)
+	}
+}
+
+type staticRunner struct {
+	out   string
+	calls int
+}
+
+func (s *staticRunner) Run(ctx context.Context, prompt string) (string, error) {
+	s.calls++
+	return s.out, nil
+}
+
+// flakyLinkRunner returns malformed JSON on the first call and good on the rest.
+type flakyLinkRunner struct {
+	good  string
+	calls int
+}
+
+func (f *flakyLinkRunner) Run(ctx context.Context, prompt string) (string, error) {
+	f.calls++
+	if f.calls == 1 {
+		return "not json", nil
+	}
+	return f.good, nil
+}
+
+// perFactLinkRunner emits a valid proposal for goodSrc's prompt and malformed
+// JSON for badSrc's prompt (identified by the "## Source fact" section).
+type perFactLinkRunner struct {
+	badSrc, goodSrc, goodDst string
+}
+
+func (p *perFactLinkRunner) Run(ctx context.Context, prompt string) (string, error) {
+	if strings.Contains(prompt, "## Source fact\n### "+p.goodSrc+"\n") {
+		return `{"links":[{"dst":"` + p.goodDst + `","relation":"relates","why":"x"}]}`, nil
+	}
+	return "not json", nil // badSrc (and anything else) is malformed
+}

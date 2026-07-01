@@ -124,8 +124,8 @@ func PlanInstall(o Options) ([]Action, error) {
 			Content: setup.DegradedClaudeMD(mem), Mode: 0o644},
 		Action{Kind: "write", Path: adapter, Summary: "LLM agent adapter",
 			Content: setup.AdapterScript(o.Model), Mode: 0o755},
-		Action{Kind: "write", Path: filepath.Join(mem, ".bbrain", "env.sh"), Summary: "BBRAIN_AGENT_CLI export",
-			Content: setup.EnvExportLine(adapter) + "\n", Mode: 0o644},
+		Action{Kind: "write", Path: filepath.Join(mem, ".bbrain", "env.sh"), Summary: "BBRAIN_AGENT_CLI + BBRAIN_HOME export",
+			Content: setup.EnvExportLine(adapter, mem) + "\n", Mode: 0o644},
 	)
 
 	// 2. integration CLAUDE.md (managed block)

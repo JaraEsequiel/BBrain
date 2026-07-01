@@ -94,11 +94,11 @@ func TestClaudeMDBlockMentionsToolsAndMarkers(t *testing.T) {
 }
 
 func TestEnvExportLine(t *testing.T) {
-	if got := EnvExportLine("/x/y.sh"); got != `export BBRAIN_AGENT_CLI='/x/y.sh'` {
+	if got := EnvExportLine("/x/y.sh", "/home/brain"); got != "export BBRAIN_AGENT_CLI='/x/y.sh'\nexport BBRAIN_HOME='/home/brain'" {
 		t.Fatalf("env line = %q", got)
 	}
-	// a single quote in the path is escaped, not break-out
-	if got := EnvExportLine("/a'b"); got != `export BBRAIN_AGENT_CLI='/a'\''b'` {
+	// a single quote in either path is escaped, not break-out (injection-proof)
+	if got := EnvExportLine("/a'b", "/h'm"); got != `export BBRAIN_AGENT_CLI='/a'\''b'`+"\n"+`export BBRAIN_HOME='/h'\''m'` {
 		t.Fatalf("env line (quote) = %q", got)
 	}
 }

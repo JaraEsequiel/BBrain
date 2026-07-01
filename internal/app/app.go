@@ -546,7 +546,7 @@ func (a *App) SetupClaudeCode(opts SetupOptions) ([]SetupAction, error) {
 	actions = append(actions, SetupAction{Path: cmPath, Summary: "managed CLAUDE.md block", Content: updated, Mode: 0o644})
 
 	envPath := filepath.Join(opts.BrainHome, ".bbrain", "env.sh")
-	actions = append(actions, SetupAction{Path: envPath, Summary: "BBRAIN_AGENT_CLI export (source this)", Content: setup.EnvExportLine(adapterPath) + "\n", Mode: 0o644})
+	actions = append(actions, SetupAction{Path: envPath, Summary: "BBRAIN_AGENT_CLI + BBRAIN_HOME export (source this)", Content: setup.EnvExportLine(adapterPath, opts.BrainHome) + "\n", Mode: 0o644})
 
 	if opts.DryRun {
 		return actions, nil
@@ -586,7 +586,7 @@ func (a *App) VaultMove(dest string, opts VaultMoveOptions) (string, int, error)
 	adapter := filepath.Join(absDest, ".bbrain", "agents", "claude-code.sh")
 	if _, statErr := os.Stat(adapter); statErr == nil {
 		envPath := filepath.Join(absDest, ".bbrain", "env.sh")
-		if err := os.WriteFile(envPath, []byte(setup.EnvExportLine(adapter)+"\n"), 0o644); err != nil {
+		if err := os.WriteFile(envPath, []byte(setup.EnvExportLine(adapter, absDest)+"\n"), 0o644); err != nil {
 			return "", 0, fmt.Errorf("brain moved to %s but env.sh refresh failed: %w", absDest, err)
 		}
 	}

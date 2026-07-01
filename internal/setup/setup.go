@@ -183,10 +183,13 @@ func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// EnvExportLine is the POSIX-sh line that points BBrain at the agent adapter,
-// safely single-quoted so any path is injection-proof when sourced.
-func EnvExportLine(adapterPath string) string {
-	return "export BBRAIN_AGENT_CLI=" + shellSingleQuote(adapterPath)
+// EnvExportLine is the POSIX-sh block that points BBrain at the agent adapter
+// and at the brain home, safely single-quoted so any path is injection-proof
+// when sourced. Exporting BBRAIN_HOME is what keeps `bbrain wiki build/link/lint`
+// from silently falling back to ~/.bbrain/default when the CLI is used directly.
+func EnvExportLine(adapterPath, brainHome string) string {
+	return "export BBRAIN_AGENT_CLI=" + shellSingleQuote(adapterPath) + "\n" +
+		"export BBRAIN_HOME=" + shellSingleQuote(brainHome)
 }
 
 // DegradedClaudeMD is the L/CLAUDE.md placed at the vault root: it teaches a

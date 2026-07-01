@@ -278,6 +278,7 @@ func cmdWikiBuild(args []string, stdout, stderr io.Writer) int {
 	scope := fs.String("scope", "", "only distill facts in this scope")
 	cats := fs.String("categories", "", "extra wiki categories (comma-separated)")
 	dryRun := fs.Bool("dry-run", false, "print what would be written without writing")
+	home := fs.String("home", "", "brain home (default: resolved brain root)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -289,7 +290,17 @@ func cmdWikiBuild(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 	}
-	a := app.New(brainRoot())
+	root := *home
+	if root == "" {
+		root = brainRoot()
+	}
+	a := app.New(root)
+	// Loud signal for the classic misconfiguration: a wrong/unset home resolves to
+	// a path with no brain, and the build then runs against an empty vault, exiting 0
+	// silently (BBRAIN_HOME unset -> brainRoot() -> ~/.bbrain/default).
+	if _, err := os.Stat(a.Brain.FactsDir()); os.IsNotExist(err) {
+		fmt.Fprintf(stderr, "wiki build: warning: no brain at %q (facts dir missing); nothing will be distilled until --home/BBRAIN_HOME points at a real brain or `bbrain init` runs there\n", root)
+	}
 	res, err := a.WikiBuild(context.Background(), app.WikiBuildOptions{
 		Project: *project, Scope: *scope, Categories: extra, DryRun: *dryRun,
 	})
@@ -339,10 +350,21 @@ func cmdWikiLink(args []string, stdout, stderr io.Writer) int {
 	scope := fs.String("scope", "", "only link facts in this scope")
 	limit := fs.Int("limit", 8, "max FTS candidates considered per fact")
 	dryRun := fs.Bool("dry-run", false, "print proposed links without writing")
+	home := fs.String("home", "", "brain home (default: resolved brain root)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	a := app.New(brainRoot())
+	root := *home
+	if root == "" {
+		root = brainRoot()
+	}
+	a := app.New(root)
+	// Loud signal for the classic misconfiguration: a wrong/unset home resolves to
+	// a path with no brain, and linking then runs against an empty vault, exiting 0
+	// silently (BBRAIN_HOME unset -> brainRoot() -> ~/.bbrain/default).
+	if _, err := os.Stat(a.Brain.FactsDir()); os.IsNotExist(err) {
+		fmt.Fprintf(stderr, "wiki link: warning: no brain at %q (facts dir missing); nothing will be linked until --home/BBRAIN_HOME points at a real brain or `bbrain init` runs there\n", root)
+	}
 	res, err := a.WikiLink(context.Background(), app.WikiLinkOptions{
 		Project: *project, Scope: *scope, Limit: *limit, DryRun: *dryRun,
 	})
@@ -382,6 +404,7 @@ func cmdWikiLint(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	cats := fs.String("categories", "", "extra wiki categories (comma-separated)")
 	fix := fs.Bool("fix", false, "apply mechanically-safe repairs")
+	home := fs.String("home", "", "brain home (default: resolved brain root)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -393,7 +416,17 @@ func cmdWikiLint(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 	}
-	a := app.New(brainRoot())
+	root := *home
+	if root == "" {
+		root = brainRoot()
+	}
+	a := app.New(root)
+	// Loud signal for the classic misconfiguration: a wrong/unset home resolves to
+	// a path with no brain, and lint then runs against an empty vault, exiting 0
+	// silently (BBRAIN_HOME unset -> brainRoot() -> ~/.bbrain/default).
+	if _, err := os.Stat(a.Brain.FactsDir()); os.IsNotExist(err) {
+		fmt.Fprintf(stderr, "wiki lint: warning: no brain at %q (facts dir missing); nothing will be linted until --home/BBRAIN_HOME points at a real brain or `bbrain init` runs there\n", root)
+	}
 	res, err := a.WikiLint(app.WikiLintOptions{Categories: extra, Fix: *fix})
 	if err != nil {
 		fmt.Fprintf(stderr, "wiki lint: %v\n", err)

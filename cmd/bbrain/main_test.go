@@ -153,6 +153,40 @@ func TestEndToEndWikiBuild(t *testing.T) {
 	}
 }
 
+// A backend that always emits malformed JSON skips every batch: nothing is
+// written, so the CLI exits 1 and warns on stderr (re-run to retry). This pins
+// the exit-code contract: skips + zero pages written == failure.
+func TestWikiBuildAllBatchesSkippedExitsOne(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("BBRAIN_HOME", home)
+	var out, errOut bytes.Buffer
+
+	if code := run([]string{"init"}, &out, &errOut); code != 0 {
+		t.Fatalf("init: %s", errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"save", "--title", "Use JWT", "--project", "shopapp",
+		"--type", "decision", "--body", "jwt"}, &out, &errOut); code != 0 {
+		t.Fatalf("save: %s", errOut.String())
+	}
+	// Agent emits invalid JSON every call => batch exhausts retries and is skipped.
+	script := filepath.Join(t.TempDir(), "agent.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat >/dev/null\nprintf 'not json'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BBRAIN_AGENT_CLI", script)
+
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"wiki", "build"}, &out, &errOut); code != 1 {
+		t.Fatalf("exit = %d, want 1 (nothing written but batches skipped)", code)
+	}
+	if !strings.Contains(errOut.String(), "skipped") || !strings.Contains(errOut.String(), "re-run") {
+		t.Fatalf("stderr should warn about skipped batches, got: %q", errOut.String())
+	}
+}
+
 func TestWikiBuildUnconfiguredFails(t *testing.T) {
 	t.Setenv("BBRAIN_HOME", t.TempDir())
 	t.Setenv("BBRAIN_AGENT_CLI", "")

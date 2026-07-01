@@ -273,9 +273,19 @@ type BuildOptions struct {
 	BatchSize  int // facts per LLM call; 0 => defaultBatchSize
 }
 
+// SkippedBatch records a batch that exhausted maxBatchAttempts and was dropped
+// so the rest of the build could proceed. Its facts are not distilled this run;
+// they are picked up on the next build (Build is idempotent).
+type SkippedBatch struct {
+	Index   int      // batch index (1-based) within this build
+	FactIDs []string // ids of the facts in the skipped batch
+	Err     string   // last error that caused the batch to be given up
+}
+
 // BuildResult reports what a build wrote.
 type BuildResult struct {
-	Written  []string // slash relpaths
+	Written  []string       // slash relpaths
+	Skipped  []SkippedBatch // batches dropped after exhausting retries (graceful degradation)
 	LogEntry string
 	DryRun   bool
 }
@@ -382,6 +392,7 @@ func Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
 	// preserved by keys so writes and the log stay deterministic.
 	merged := map[string]*Page{}
 	var keys []string
+	var skipped []SkippedBatch
 	for i, batch := range batches {
 		// existing is read once and passed to every batch so each can reconcile.
 		prompt := BuildPrompt(batch, existing, opts.Categories)
@@ -402,7 +413,16 @@ func Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
 			}
 		}
 		if lastErr != nil {
-			return BuildResult{}, fmt.Errorf("wiki: batch %d/%d failed after %d attempts: %w", i+1, len(batches), maxBatchAttempts, lastErr)
+			// Graceful degradation: a batch that exhausts its retries (repeatably
+			// malformed JSON from the backend) must not discard the batches that
+			// succeeded. Skip it, record what was dropped, and keep going; its
+			// facts are recovered on the next build (Build is idempotent).
+			ids := make([]string, len(batch))
+			for j, f := range batch {
+				ids[j] = f.ID
+			}
+			skipped = append(skipped, SkippedBatch{Index: i + 1, FactIDs: ids, Err: lastErr.Error()})
+			continue
 		}
 		for _, p := range pages {
 			p := p
@@ -447,7 +467,11 @@ func Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
 		}
 		logb.WriteString(fmt.Sprintf("- wrote %s (%d %s): %s\n", rel, len(p.Sources), noun, reason))
 	}
-	res := BuildResult{Written: written, LogEntry: logb.String(), DryRun: opts.DryRun}
+	for _, sb := range skipped {
+		logb.WriteString(fmt.Sprintf("- SKIPPED batch %d (%d facts: %s) after %d attempts: %s\n",
+			sb.Index, len(sb.FactIDs), strings.Join(sb.FactIDs, ", "), maxBatchAttempts, sb.Err))
+	}
+	res := BuildResult{Written: written, Skipped: skipped, LogEntry: logb.String(), DryRun: opts.DryRun}
 	if opts.DryRun {
 		return res, nil
 	}

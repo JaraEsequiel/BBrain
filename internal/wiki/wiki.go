@@ -282,12 +282,25 @@ type SkippedBatch struct {
 	Err     string   // last error that caused the batch to be given up
 }
 
+// InvalidPage records a single page the LLM produced that failed ValidatePage
+// (hallucinated source id, unknown category, bad slug, empty body, ...). It is
+// dropped so the rest of the build's valid pages still get written; its facts are
+// re-distilled on the next build (Build is idempotent). This is content-level
+// degradation, distinct from infrastructure failures (IO/index/log) which still
+// abort the whole build.
+type InvalidPage struct {
+	Slug     string // the page's slug (may be malformed, kept as-is for the report)
+	Category string
+	Err      string // the ValidatePage error that caused the drop
+}
+
 // BuildResult reports what a build wrote.
 type BuildResult struct {
-	Written  []string       // slash relpaths
-	Skipped  []SkippedBatch // batches dropped after exhausting retries (graceful degradation)
-	LogEntry string
-	DryRun   bool
+	Written      []string       // slash relpaths
+	Skipped      []SkippedBatch // batches dropped after exhausting retries (graceful degradation)
+	InvalidPages []InvalidPage  // pages dropped for failing validation (LLM produced bad content)
+	LogEntry     string
+	DryRun       bool
 }
 
 // BuildPrompt assembles the LLM prompt: instructions, the category vocabulary,
@@ -369,8 +382,9 @@ func mergePage(dst *Page, add Page) {
 }
 
 // Build runs one wiki build: prompt the LLM, validate every page, then write
-// pages, regenerate the index, and append the log. On any validation error
-// nothing is written.
+// the valid pages, regenerate the index, and append the log. A page that fails
+// validation is dropped and reported in BuildResult.InvalidPages (the LLM
+// produced bad content); only infrastructure failures (IO, index, log) abort.
 func Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
 	byID := map[string]fact.Fact{}
 	for _, f := range opts.Facts {
@@ -443,11 +457,22 @@ func Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
 	for _, c := range opts.Categories {
 		valid[c] = true
 	}
+	// Best-effort validation: a page that fails ValidatePage is the LLM producing
+	// bad content (hallucinated source, unknown category, bad slug, ...), not a
+	// build corruption. Drop it and record it — same skip-on-exhaust posture as a
+	// bad batch — so the valid pages still get written. Infrastructure failures
+	// (MkdirAll/WriteFile/RegenerateIndex/AppendLog below) still abort. Order of
+	// the surviving pages is preserved (filter in place).
+	var invalid []InvalidPage
+	kept := pages[:0]
 	for _, p := range pages {
 		if err := ValidatePage(p, valid, byID); err != nil {
-			return BuildResult{}, err
+			invalid = append(invalid, InvalidPage{Slug: p.Slug, Category: p.Category, Err: err.Error()})
+			continue
 		}
+		kept = append(kept, p)
 	}
+	pages = kept
 
 	now := opts.Now().UTC().Format(time.RFC3339)
 	var written []string
@@ -471,7 +496,10 @@ func Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
 		logb.WriteString(fmt.Sprintf("- SKIPPED batch %d (%d facts: %s) after %d attempts: %s\n",
 			sb.Index, len(sb.FactIDs), strings.Join(sb.FactIDs, ", "), maxBatchAttempts, sb.Err))
 	}
-	res := BuildResult{Written: written, Skipped: skipped, LogEntry: logb.String(), DryRun: opts.DryRun}
+	for _, ip := range invalid {
+		logb.WriteString(fmt.Sprintf("- INVALID page %s (%s): %s\n", ip.Slug, ip.Category, ip.Err))
+	}
+	res := BuildResult{Written: written, Skipped: skipped, InvalidPages: invalid, LogEntry: logb.String(), DryRun: opts.DryRun}
 	if opts.DryRun {
 		return res, nil
 	}

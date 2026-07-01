@@ -303,10 +303,11 @@ func cmdWikiBuild(args []string, stdout, stderr io.Writer) int {
 	for _, w := range res.Written {
 		fmt.Fprintln(stdout, w)
 	}
-	// Graceful degradation: Build skips batches that exhaust their retries instead
-	// of aborting. Exit-code contract: success (0) if at least one page was written
-	// even when some batches were skipped — partial progress is real and the skipped
-	// facts are recovered on the next run. Failure (1) only if skips happened AND
+	// Graceful degradation: Build skips batches that exhaust their retries and drops
+	// pages that fail validation (the LLM hallucinated) instead of aborting. Exit-code
+	// contract: success (0) if at least one page was written even when some batches or
+	// pages were skipped — partial progress is real and the dropped facts/pages are
+	// recovered on the next run. Failure (1) only if something was skipped/invalid AND
 	// nothing was written, i.e. the build produced nothing useful.
 	if len(res.Skipped) > 0 {
 		var facts int
@@ -318,9 +319,15 @@ func cmdWikiBuild(args []string, stdout, stderr io.Writer) int {
 		for _, s := range res.Skipped {
 			fmt.Fprintf(stderr, "  batch %d (%d facts): %s\n", s.Index, len(s.FactIDs), s.Err)
 		}
-		if len(res.Written) == 0 {
-			return 1
+	}
+	if len(res.InvalidPages) > 0 {
+		fmt.Fprintf(stderr, "wiki build: dropped %d invalid page(s) — re-run to retry\n", len(res.InvalidPages))
+		for _, ip := range res.InvalidPages {
+			fmt.Fprintf(stderr, "  page %s (%s): %s\n", ip.Slug, ip.Category, ip.Err)
 		}
+	}
+	if (len(res.Skipped) > 0 || len(res.InvalidPages) > 0) && len(res.Written) == 0 {
+		return 1
 	}
 	return 0
 }

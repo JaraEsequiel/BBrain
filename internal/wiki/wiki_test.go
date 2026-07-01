@@ -200,17 +200,87 @@ func TestBuildWritesPagesIndexLog(t *testing.T) {
 	}
 }
 
-func TestBuildAbortsOnInvalidPage(t *testing.T) {
+// TestBuildSkipsInvalidPage: a page citing an unknown fact id (the LLM hallucinated
+// a source) is best-effort — the page is dropped and reported in res.InvalidPages,
+// not aborted. Here the only page is invalid, so nothing is written but Build still
+// returns without a Go error. Replaces the old abort-on-invalid-page contract.
+func TestBuildSkipsInvalidPage(t *testing.T) {
 	dir := t.TempDir()
 	facts := []fact.Fact{{ID: "f1", Title: "F", Project: "p", Scope: "project", Body: "b"}}
 	fr := &fakeRunner{out: `{"pages":[{"slug":"ok","category":"decisions","title":"T","sources":["nope"],"body":"b","change_reason":"x"}]}`}
+	res, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Categories: DefaultCategories, Runner: fr, Now: fixedNow,
+	})
+	must(t, err)
+	if len(res.Written) != 0 {
+		t.Fatalf("written = %+v, want nothing (only page was invalid)", res.Written)
+	}
+	if len(res.InvalidPages) != 1 || res.InvalidPages[0].Slug != "ok" || res.InvalidPages[0].Err == "" {
+		t.Fatalf("invalidPages = %+v, want one entry for slug 'ok' with a reason", res.InvalidPages)
+	}
+	for _, e := range mustReadDir(t, dir) {
+		if e == "index.md" || e == "log.md" {
+			continue
+		}
+		t.Fatalf("Build wrote a page despite invalid page: %s", e)
+	}
+}
+
+// TestBuildSkipsInvalidPageWritesValidOnes: two pages in one batch — one cites an
+// unknown fact (invalid), one is fine. Build must COMPLETE, write the valid page,
+// and report the invalid one in res.InvalidPages, no Go error. Fails against the
+// old code that aborted the whole build on the first invalid page.
+func TestBuildSkipsInvalidPageWritesValidOnes(t *testing.T) {
+	dir := t.TempDir()
+	facts := []fact.Fact{
+		{ID: "real", Title: "Real", Project: "shopapp", Scope: "project", Body: "b"},
+	}
+	// One batch, two pages: "good" cites the real fact; "bad" cites a hallucinated id.
+	fr := &fakeRunner{out: `{"pages":[
+		{"slug":"good","category":"decisions","title":"Good","sources":["real"],"body":"b","change_reason":"x"},
+		{"slug":"bad","category":"decisions","title":"Bad","sources":["hallucinated"],"body":"b","change_reason":"x"}
+	]}`}
+	res, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Categories: DefaultCategories, Runner: fr, Now: fixedNow,
+	})
+	must(t, err)
+	if len(res.Written) != 1 || res.Written[0] != "projects/shopapp/decisions/good.md" {
+		t.Fatalf("written = %+v, want just the good page", res.Written)
+	}
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash("projects/shopapp/decisions/good.md"))); err != nil {
+		t.Fatalf("good page not written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash("projects/shopapp/decisions/bad.md"))); err == nil {
+		t.Fatal("bad page was written, want it skipped")
+	}
+	if len(res.InvalidPages) != 1 || res.InvalidPages[0].Slug != "bad" {
+		t.Fatalf("invalidPages = %+v, want one entry for slug 'bad'", res.InvalidPages)
+	}
+	// The invalid page must be reported in the log too.
+	logb, _ := os.ReadFile(filepath.Join(dir, "log.md"))
+	if !strings.Contains(string(logb), "INVALID") || !strings.Contains(string(logb), "bad") {
+		t.Fatalf("log missing invalid-page report:\n%s", logb)
+	}
+}
+
+// TestBuildInfraFailureStillAborts: the page is VALID, but its target directory
+// can't be created — a regular file already sits where the page's parent dir
+// needs to go, so MkdirAll fails with ENOTDIR during the write pass. This is
+// infrastructure (IO), not bad LLM content — Build must return a Go error, NOT
+// treat it as an invalid page and silently drop it.
+func TestBuildInfraFailureStillAborts(t *testing.T) {
+	dir := t.TempDir()
+	// The valid page resolves to projects/p/decisions/ok.md. Plant a file at
+	// projects/p so MkdirAll("projects/p/decisions") fails with ENOTDIR.
+	must(t, os.MkdirAll(filepath.Join(dir, "projects"), 0o755))
+	must(t, os.WriteFile(filepath.Join(dir, "projects", "p"), []byte("x"), 0o644))
+
+	facts := []fact.Fact{{ID: "f1", Title: "F", Project: "p", Scope: "project", Body: "b"}}
+	fr := &fakeRunner{out: `{"pages":[{"slug":"ok","category":"decisions","title":"T","sources":["f1"],"body":"b","change_reason":"x"}]}`}
 	if _, err := Build(context.Background(), BuildOptions{
 		WikiDir: dir, Facts: facts, Categories: DefaultCategories, Runner: fr, Now: fixedNow,
 	}); err == nil {
-		t.Fatal("Build should abort on unknown source")
-	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
-		t.Fatalf("Build wrote files despite invalid page: %v", entries)
+		t.Fatal("Build should return an error on an IO/write failure, not skip the page")
 	}
 }
 

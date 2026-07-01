@@ -359,6 +359,21 @@ func cmdWikiLink(args []string, stdout, stderr io.Writer) int {
 	if res.Skipped > 0 {
 		fmt.Fprintf(stdout, "(skipped %d already-linked)\n", res.Skipped)
 	}
+	// Graceful degradation: WikiLink drops a fact whose LLM linking exhausts its
+	// retries instead of aborting. Same exit-code contract as cmdWikiBuild: success
+	// (0) if at least one link was written even when some facts were dropped —
+	// partial progress is real and the dropped facts are recovered next run; also 0
+	// when there was simply nothing to link. Failure (1) only if facts were dropped
+	// AND nothing was written, i.e. the run produced nothing useful.
+	if len(res.Failed) > 0 {
+		fmt.Fprintf(stderr, "wiki link: dropped %d fact(s) after exhausting retries — re-run to retry\n", len(res.Failed))
+		for _, f := range res.Failed {
+			fmt.Fprintf(stderr, "  fact %s: %s\n", f.FactID, f.Err)
+		}
+	}
+	if len(res.Failed) > 0 && len(res.Written) == 0 {
+		return 1
+	}
 	return 0
 }
 

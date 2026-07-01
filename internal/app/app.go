@@ -334,7 +334,7 @@ func (a *App) WikiLink(ctx context.Context, opts WikiLinkOptions) (wiki.LinkResu
 		candMap[f.ID] = cs
 	}
 
-	proposals, err := wiki.Link(ctx, wiki.LinkOptions{Facts: filtered, Candidates: candMap, Runner: a.Runner})
+	proposals, failed, err := wiki.Link(ctx, wiki.LinkOptions{Facts: filtered, Candidates: candMap, Runner: a.Runner})
 	if err != nil {
 		return wiki.LinkResult{}, err
 	}
@@ -366,7 +366,10 @@ func (a *App) WikiLink(ctx context.Context, opts WikiLinkOptions) (wiki.LinkResu
 		}
 	}
 
-	if !opts.DryRun && len(written) > 0 {
+	// Log when anything happened worth recording: links written OR facts dropped
+	// after exhausting retries (so a run that produced only failures still leaves a
+	// trail to re-run against).
+	if !opts.DryRun && (len(written) > 0 || len(failed) > 0) {
 		now := a.Store.Now().UTC().Format(time.RFC3339)
 		var sb strings.Builder
 		sb.WriteString("\n## " + now + " — wiki link\n")
@@ -376,6 +379,9 @@ func (a *App) WikiLink(ctx context.Context, opts WikiLinkOptions) (wiki.LinkResu
 		if skipped > 0 {
 			sb.WriteString(fmt.Sprintf("- (skipped %d already-linked)\n", skipped))
 		}
+		for _, fl := range failed {
+			sb.WriteString(fmt.Sprintf("- FAILED %s: %s\n", fl.FactID, fl.Err))
+		}
 		if err := os.MkdirAll(a.Brain.WikiDir(), 0o755); err != nil {
 			return wiki.LinkResult{}, err
 		}
@@ -384,7 +390,7 @@ func (a *App) WikiLink(ctx context.Context, opts WikiLinkOptions) (wiki.LinkResu
 		}
 	}
 
-	return wiki.LinkResult{Written: written, Skipped: skipped, DryRun: opts.DryRun}, nil
+	return wiki.LinkResult{Written: written, Skipped: skipped, Failed: failed, DryRun: opts.DryRun}, nil
 }
 
 // RemoveLink drops the reasoned wikilink from srcID to dstID on the source

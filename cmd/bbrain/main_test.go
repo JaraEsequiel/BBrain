@@ -294,6 +294,38 @@ func TestEndToEndWikiLink(t *testing.T) {
 	}
 }
 
+// The agent emits malformed JSON on every call, so every fact's linking exhausts
+// its retries and is dropped. Nothing is written => exit 1 with a re-run warning
+// on stderr. Pins the CLI side of the link skip-on-exhaust contract (mirrors
+// TestWikiBuildAllBatchesSkippedExitsOne).
+func TestWikiLinkAllFactsFailExitsOne(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("BBRAIN_HOME", home)
+	var out, errOut bytes.Buffer
+
+	if code := run([]string{"init"}, &out, &errOut); code != 0 {
+		t.Fatalf("init: %s", errOut.String())
+	}
+	// Two related facts so at least one has a candidate and the runner is invoked.
+	run([]string{"save", "--title", "JWT access", "--project", "p", "--type", "decision", "--body", "jwt access token"}, &out, &errOut)
+	run([]string{"save", "--title", "JWT refresh", "--project", "p", "--type", "decision", "--body", "jwt refresh token"}, &out, &errOut)
+
+	script := filepath.Join(t.TempDir(), "agent.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat >/dev/null\nprintf 'not json'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BBRAIN_AGENT_CLI", script)
+
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"wiki", "link"}, &out, &errOut); code != 1 {
+		t.Fatalf("exit = %d, want 1 (nothing written but facts dropped); stderr=%q", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "dropped") || !strings.Contains(errOut.String(), "re-run") {
+		t.Fatalf("stderr should warn about dropped facts, got: %q", errOut.String())
+	}
+}
+
 func TestWikiLinkUnconfiguredFails(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("BBRAIN_HOME", home)

@@ -377,6 +377,62 @@ func (r *scriptedRunner) Run(ctx context.Context, prompt string) (string, error)
 	return out, nil
 }
 
+func TestBuildRetriesTransientBatchFailure(t *testing.T) {
+	dir := t.TempDir()
+	facts := []fact.Fact{{ID: "a", Title: "A", Scope: "project", Project: "shopapp", Body: "ba"}}
+	// One batch (BatchSize=1): first attempt returns malformed JSON, second is valid.
+	// The non-deterministic backend flaked once; the retry must recover.
+	fr := &scriptedRunner{outs: []string{
+		`{"pages":[{"slug":"auth","category":"decisions","title":"Auth","sources":True}]}`,
+		`{"pages":[{"slug":"auth","category":"decisions","title":"Auth","sources":["a"],"body":"BODY","change_reason":"created"}]}`,
+	}}
+	res, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Categories: DefaultCategories,
+		Runner: fr, Now: fixedNow, BatchSize: 1,
+	})
+	must(t, err)
+	if len(res.Written) != 1 {
+		t.Fatalf("written = %+v, want the page after retry", res.Written)
+	}
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash("projects/shopapp/decisions/auth.md"))); err != nil {
+		t.Fatalf("page not written after retry: %v", err)
+	}
+	if fr.i != 2 {
+		t.Fatalf("runner calls = %d, want 2 (one flake + one success)", fr.i)
+	}
+}
+
+// countingFailRunner always fails and counts how many times it was called, to
+// prove Build gives up only after maxBatchAttempts attempts on a truly-broken batch.
+type countingFailRunner struct{ calls int }
+
+func (r *countingFailRunner) Run(ctx context.Context, prompt string) (string, error) {
+	r.calls++
+	return "", errors.New("backend down")
+}
+
+func TestBuildGivesUpAfterMaxAttempts(t *testing.T) {
+	dir := t.TempDir()
+	facts := []fact.Fact{{ID: "a", Title: "A", Scope: "project", Project: "shopapp", Body: "ba"}}
+	fr := &countingFailRunner{}
+	_, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Categories: DefaultCategories,
+		Runner: fr, Now: fixedNow, BatchSize: 1,
+	})
+	if err == nil {
+		t.Fatal("Build should fail when a batch exhausts all attempts")
+	}
+	if !strings.Contains(err.Error(), "batch") {
+		t.Fatalf("error should identify the batch, got: %v", err)
+	}
+	if fr.calls != maxBatchAttempts {
+		t.Fatalf("runner calls = %d, want maxBatchAttempts=%d", fr.calls, maxBatchAttempts)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("Build wrote files despite exhausted batch: %v", entries)
+	}
+}
+
 func TestBuildMergesPagesSameKey(t *testing.T) {
 	dir := t.TempDir()
 	// Two facts, same project => same bucket. Two batches (BatchSize=1) each emit

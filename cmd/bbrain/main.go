@@ -303,6 +303,25 @@ func cmdWikiBuild(args []string, stdout, stderr io.Writer) int {
 	for _, w := range res.Written {
 		fmt.Fprintln(stdout, w)
 	}
+	// Graceful degradation: Build skips batches that exhaust their retries instead
+	// of aborting. Exit-code contract: success (0) if at least one page was written
+	// even when some batches were skipped — partial progress is real and the skipped
+	// facts are recovered on the next run. Failure (1) only if skips happened AND
+	// nothing was written, i.e. the build produced nothing useful.
+	if len(res.Skipped) > 0 {
+		var facts int
+		for _, s := range res.Skipped {
+			facts += len(s.FactIDs)
+		}
+		fmt.Fprintf(stderr, "wiki build: skipped %d batch(es), %d facts not distilled this run — re-run to retry\n",
+			len(res.Skipped), facts)
+		for _, s := range res.Skipped {
+			fmt.Fprintf(stderr, "  batch %d (%d facts): %s\n", s.Index, len(s.FactIDs), s.Err)
+		}
+		if len(res.Written) == 0 {
+			return 1
+		}
+	}
 	return 0
 }
 

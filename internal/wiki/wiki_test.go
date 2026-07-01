@@ -341,26 +341,33 @@ func TestBuildDefaultBatchSizeIsTen(t *testing.T) {
 	}
 }
 
+// TestBuildBatchFailureIsVisible: failing batches must stay visible. Under
+// skip-on-exhaust they surface via res.Skipped (not a Go error) and never write
+// garbage. Here every batch fails (runner refuses >5 facts, BatchSize=10), so all
+// 3 batches are skipped, nothing is written, and each is reported.
 func TestBuildBatchFailureIsVisible(t *testing.T) {
 	dir := t.TempDir()
 	var facts []fact.Fact
 	for i := 0; i < 30; i++ {
 		facts = append(facts, fact.Fact{ID: "f" + strconv.Itoa(i), Title: "T", Scope: "global", Body: "b"})
 	}
-	// maxFacts smaller than BatchSize => every batch fails; error must name the batch/total.
 	fr := &batchAwareRunner{maxFacts: 5}
-	_, err := Build(context.Background(), BuildOptions{
+	res, err := Build(context.Background(), BuildOptions{
 		WikiDir: dir, Facts: facts, Categories: DefaultCategories,
 		Runner: fr, Now: fixedNow, BatchSize: 10,
 	})
-	if err == nil {
-		t.Fatal("Build should surface a failing batch")
+	must(t, err)
+	if len(res.Written) != 0 {
+		t.Fatalf("written = %+v, want nothing when every batch fails", res.Written)
 	}
-	if !strings.Contains(err.Error(), "batch") {
-		t.Fatalf("error should identify the batch, got: %v", err)
+	if len(res.Skipped) != 3 {
+		t.Fatalf("skipped = %+v, want all 3 batches reported", res.Skipped)
 	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
-		t.Fatalf("Build wrote files despite failing batch: %v", entries)
+	for _, e := range mustReadDir(t, dir) {
+		if e == "index.md" || e == "log.md" {
+			continue
+		}
+		t.Fatalf("Build wrote a page despite every batch failing: %s", e)
 	}
 }
 
@@ -411,26 +418,134 @@ func (r *countingFailRunner) Run(ctx context.Context, prompt string) (string, er
 	return "", errors.New("backend down")
 }
 
+// TestBuildGivesUpAfterMaxAttempts: with skip-on-exhaust semantics, a batch that
+// exhausts its retries is no longer a Go error — the build degrades gracefully.
+// When that batch is the ONLY batch, the contract is: no error, nothing written
+// (a broken batch never writes garbage), and the drop is reported in res.Skipped
+// (so it stays auditable). The retry count is still capped at maxBatchAttempts.
 func TestBuildGivesUpAfterMaxAttempts(t *testing.T) {
 	dir := t.TempDir()
 	facts := []fact.Fact{{ID: "a", Title: "A", Scope: "project", Project: "shopapp", Body: "ba"}}
 	fr := &countingFailRunner{}
-	_, err := Build(context.Background(), BuildOptions{
+	res, err := Build(context.Background(), BuildOptions{
 		WikiDir: dir, Facts: facts, Categories: DefaultCategories,
 		Runner: fr, Now: fixedNow, BatchSize: 1,
 	})
-	if err == nil {
-		t.Fatal("Build should fail when a batch exhausts all attempts")
-	}
-	if !strings.Contains(err.Error(), "batch") {
-		t.Fatalf("error should identify the batch, got: %v", err)
-	}
+	must(t, err) // a flaky batch is not a build error anymore
 	if fr.calls != maxBatchAttempts {
 		t.Fatalf("runner calls = %d, want maxBatchAttempts=%d", fr.calls, maxBatchAttempts)
 	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
-		t.Fatalf("Build wrote files despite exhausted batch: %v", entries)
+	if len(res.Written) != 0 {
+		t.Fatalf("written = %+v, want nothing (broken batch must not write)", res.Written)
 	}
+	if len(res.Skipped) != 1 || res.Skipped[0].Index != 1 || len(res.Skipped[0].FactIDs) != 1 || res.Skipped[0].FactIDs[0] != "a" {
+		t.Fatalf("skipped = %+v, want one entry for batch 1 with fact 'a'", res.Skipped)
+	}
+	if res.Skipped[0].Err == "" {
+		t.Fatalf("skipped entry should carry the last error")
+	}
+	// No page files, but index.md/log.md are fine (build still ran the write pass).
+	for _, e := range mustReadDir(t, dir) {
+		if e == "index.md" || e == "log.md" {
+			continue
+		}
+		t.Fatalf("unexpected file written for a fully-skipped build: %s", e)
+	}
+}
+
+// mustReadDir returns the base names in dir.
+func mustReadDir(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	must(t, err)
+	var out []string
+	for _, e := range entries {
+		out = append(out, e.Name())
+	}
+	return out
+}
+
+// TestBuildSkipsBadBatchAndWritesGoodOnes: batch A (fact "bad") always fails its
+// 3 attempts; batch B (fact "good") is valid. Build must COMPLETE without error,
+// write B's page, and report A in res.Skipped. Fails against the old code that
+// aborted the whole build on the first exhausted batch.
+func TestBuildSkipsBadBatchAndWritesGoodOnes(t *testing.T) {
+	dir := t.TempDir()
+	facts := []fact.Fact{
+		{ID: "bad", Title: "Bad", Scope: "project", Project: "shopapp", Body: "b"},
+		{ID: "good", Title: "Good", Scope: "project", Project: "shopapp", Body: "g"},
+	}
+	fr := &perFactRunner{failFact: "bad"}
+	res, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Categories: DefaultCategories,
+		Runner: fr, Now: fixedNow, BatchSize: 1,
+	})
+	must(t, err)
+	if len(res.Written) != 1 {
+		t.Fatalf("written = %+v, want 1 page from the good batch", res.Written)
+	}
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash("projects/shopapp/concepts/good.md"))); err != nil {
+		t.Fatalf("good page not written: %v", err)
+	}
+	if len(res.Skipped) != 1 || res.Skipped[0].FactIDs[0] != "bad" {
+		t.Fatalf("skipped = %+v, want one entry for fact 'bad'", res.Skipped)
+	}
+	// The bad batch cost maxBatchAttempts calls; the good batch cost 1.
+	if fr.badCalls != maxBatchAttempts {
+		t.Fatalf("bad-batch calls = %d, want %d", fr.badCalls, maxBatchAttempts)
+	}
+}
+
+// TestBuildAllBatchesSkippedWritesNothing: every batch exhausts its retries.
+// Contract: no Go error, res.Written empty, res.Skipped holds all batches. The
+// caller/CLI treats "nothing written + skips" as a failure; Build itself does not.
+func TestBuildAllBatchesSkippedWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	facts := []fact.Fact{
+		{ID: "a", Title: "A", Scope: "global", Body: "a"},
+		{ID: "b", Title: "B", Scope: "global", Body: "b"},
+	}
+	fr := &countingFailRunner{}
+	res, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Categories: DefaultCategories,
+		Runner: fr, Now: fixedNow, BatchSize: 1,
+	})
+	must(t, err)
+	if len(res.Written) != 0 {
+		t.Fatalf("written = %+v, want nothing", res.Written)
+	}
+	if len(res.Skipped) != 2 {
+		t.Fatalf("skipped = %+v, want both batches", res.Skipped)
+	}
+}
+
+// perFactRunner returns malformed JSON for the batch containing failFact and a
+// valid one-page-per-fact response otherwise.
+type perFactRunner struct {
+	failFact string
+	badCalls int
+}
+
+func (r *perFactRunner) Run(ctx context.Context, prompt string) (string, error) {
+	var ids []string
+	for _, line := range strings.Split(prompt, "\n") {
+		id, ok := strings.CutPrefix(line, "### ")
+		if !ok || strings.Contains(id, "/") { // skip existing-page headers (relpaths)
+			continue
+		}
+		ids = append(ids, id)
+	}
+	for _, id := range ids {
+		if id == r.failFact {
+			r.badCalls++
+			return `{"pages":[{"slug":"x","category":"concepts","title":"T","sources":True}]}`, nil
+		}
+	}
+	var pages []string
+	for _, id := range ids {
+		pages = append(pages, `{"slug":"`+id+`","category":"concepts","title":"T","sources":["`+id+`"],"body":"b","change_reason":"x"}`)
+	}
+	return `{"pages":[` + strings.Join(pages, ",") + `]}`, nil
 }
 
 func TestBuildMergesPagesSameKey(t *testing.T) {

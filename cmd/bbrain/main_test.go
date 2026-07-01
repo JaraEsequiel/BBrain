@@ -642,6 +642,23 @@ func TestMCPWarnsOnMissingBrain(t *testing.T) {
 	}
 }
 
+// TestWikiWarnsOnMissingBrain locks in the loud-failure signal for the CLI wiki
+// commands: pointing --home at a home with no brain must warn on stderr instead
+// of running silently against an empty vault (the real bug: BBRAIN_HOME unset ->
+// brainRoot() falls back to ~/.bbrain/default -> wiki exits 0 doing nothing).
+func TestWikiWarnsOnMissingBrain(t *testing.T) {
+	t.Setenv("BBRAIN_HOME", t.TempDir())
+	t.Setenv("BBRAIN_AGENT_CLI", "")
+	missing := filepath.Join(t.TempDir(), "no-brain-here")
+	for _, sub := range []string{"build", "link", "lint"} {
+		var out, errOut bytes.Buffer
+		run([]string{"wiki", sub, "--home", missing}, &out, &errOut)
+		if !strings.Contains(errOut.String(), "warning") || !strings.Contains(errOut.String(), missing) {
+			t.Fatalf("wiki %s: expected a stderr warning naming %q, got: %q", sub, missing, errOut.String())
+		}
+	}
+}
+
 func TestEndToEndContext(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("BBRAIN_HOME", home)

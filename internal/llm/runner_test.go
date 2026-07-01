@@ -4,8 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/JaraEsequiel/BBrain/internal/setup"
 )
 
 func writeScript(t *testing.T, body string) string {
@@ -86,6 +89,33 @@ func TestAgentCLIFallsBackToEnvFile(t *testing.T) {
 	home := writeEnvFile(t, `export BBRAIN_AGENT_CLI='/home/x/.bbrain/agents/claude-code.sh'`)
 	if got := AgentCLI(home); got != "/home/x/.bbrain/agents/claude-code.sh" {
 		t.Fatalf("AgentCLI = %q, want value parsed from env.sh", got)
+	}
+}
+
+// TestAgentCLIParsesRealEnvExportLine is the generator<->parser contract test:
+// it feeds the parser the LITERAL output of setup.EnvExportLine (now two lines:
+// BBRAIN_AGENT_CLI + BBRAIN_HOME) and asserts AgentCLI still extracts the adapter.
+// It fails if the parser stops tolerating the BBRAIN_HOME line or a format change
+// re-introduces the silent-failure the fix/wiki-home-loud PR closed.
+func TestAgentCLIParsesRealEnvExportLine(t *testing.T) {
+	t.Setenv("BBRAIN_AGENT_CLI", "") // force resolution through env.sh
+	adapter := "/home/x/.bbrain/agents/claude-code.sh"
+	real := setup.EnvExportLine(adapter, "/home/x")
+
+	// 1. real output: both exports present, HOME line must not shadow AGENT_CLI.
+	if got := AgentCLI(writeEnvFile(t, real)); got != adapter {
+		t.Fatalf("AgentCLI = %q, want %q parsed from real EnvExportLine output", got, adapter)
+	}
+
+	// 2. reordered (HOME first): the parser must scan every line, not just the
+	// first — a format change that reorders the block must not re-hide the adapter.
+	lines := strings.Split(real, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("EnvExportLine now emits %d lines, update this contract test", len(lines))
+	}
+	reordered := lines[1] + "\n" + lines[0]
+	if got := AgentCLI(writeEnvFile(t, reordered)); got != adapter {
+		t.Fatalf("AgentCLI = %q, want %q with BBRAIN_HOME line first", got, adapter)
 	}
 }
 

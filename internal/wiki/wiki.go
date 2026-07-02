@@ -189,6 +189,26 @@ func readPages(wikiDir string) ([]pageOnDisk, error) {
 	return out, nil
 }
 
+// SourceIDs returns the set of fact IDs cited in the sources frontmatter of at
+// least one wiki page under wikiDir. A missing wikiDir yields an empty map.
+func SourceIDs(wikiDir string) (map[string]bool, error) {
+	pages, err := readPages(wikiDir)
+	if err != nil {
+		return nil, err
+	}
+	ids := map[string]bool{}
+	for _, pg := range pages {
+		meta, err := ParsePageMeta(pg.Content)
+		if err != nil {
+			return nil, fmt.Errorf("sources: %s: %w", pg.RelPath, err)
+		}
+		for _, id := range meta.Sources {
+			ids[id] = true
+		}
+	}
+	return ids, nil
+}
+
 // RegenerateIndex rewrites wiki/index.md as a catalog of every page, grouped by
 // bucket. It is derived: BBrain reconstructs it by scanning wiki/.
 func RegenerateIndex(wikiDir string) error {
@@ -266,6 +286,7 @@ const maxBatchAttempts = 3
 type BuildOptions struct {
 	WikiDir    string
 	Facts      []fact.Fact // already filtered by project/scope
+	Archived   []fact.Fact // citation universe only: never distilled, but citable by pages
 	Categories []string    // active category vocabulary
 	Runner     llm.Runner
 	Now        func() time.Time
@@ -388,6 +409,13 @@ func mergePage(dst *Page, add Page) {
 func Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
 	byID := map[string]fact.Fact{}
 	for _, f := range opts.Facts {
+		byID[f.ID] = f
+	}
+	// Archived facts join the citation universe (ValidatePage/DeriveBucket via
+	// byID) but never the distillation batches: chunkFacts/BuildPrompt below run
+	// on opts.Facts only, so a page citing an archived fact survives while the
+	// archived content costs zero prompt tokens.
+	for _, f := range opts.Archived {
 		byID[f.ID] = f
 	}
 	existing, err := readPages(opts.WikiDir)

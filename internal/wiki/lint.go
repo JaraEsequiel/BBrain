@@ -11,11 +11,12 @@ import (
 
 // Issue is one consistency problem found by Lint.
 type Issue struct {
-	Kind     string // dangling-link | dangling-ref | missing-source | invalid-category | orphan-page | stale-page | bad-page
+	Kind     string // dangling-link | dangling-ref | missing-source | invalid-category | orphan-page | stale-page | bad-page | archived-link
 	Location string
 	Message  string
 	Fixable  bool
-	Src, Dst string // populated for dangling-link so --fix can act without re-parsing
+	Info     bool   // informative only: reported but never counted as a failure nor fixed
+	Src, Dst string // populated for dangling-link/archived-link so --fix can act without re-parsing
 }
 
 // LintResult reports the issues found and (after --fix) the ones repaired.
@@ -40,21 +41,39 @@ func scanTargets(s string) []string {
 	return out
 }
 
-// Lint runs the deterministic consistency checks over all facts and every wiki
-// page under wikiDir, judging existence against the full fact set. It never
-// mutates anything. validCategories is the active vocabulary.
-func Lint(wikiDir string, facts []fact.Fact, validCategories map[string]bool) ([]Issue, error) {
-	byID := make(map[string]fact.Fact, len(facts))
+// Lint runs the deterministic consistency checks over all active facts and
+// every wiki page under wikiDir, judging existence against the union of the
+// active and archived tiers. Archived facts resolve references (so archiving
+// never manufactures dangling/missing issues) but are not themselves linted:
+// they are frozen. It never mutates anything. validCategories is the active
+// vocabulary.
+func Lint(wikiDir string, facts, archived []fact.Fact, validCategories map[string]bool) ([]Issue, error) {
+	byID := make(map[string]fact.Fact, len(facts)+len(archived))
 	for _, f := range facts {
 		byID[f.ID] = f
 	}
+	archivedID := make(map[string]bool, len(archived))
+	for _, f := range archived {
+		byID[f.ID] = f
+		archivedID[f.ID] = true
+	}
 	var issues []Issue
 
-	// Fact-side checks.
+	// Fact-side checks (active tier only: archived facts are frozen).
 	for _, f := range facts {
 		for _, l := range f.Links {
 			dst := fact.LinkTargetID(l.Target)
 			if dst == "" {
+				continue
+			}
+			if archivedID[dst] {
+				// A live edge into the archive tier is legitimate graph signal,
+				// not damage: informative, and never fixable so --fix can't cut it.
+				issues = append(issues, Issue{
+					Kind: "archived-link", Location: "fact " + f.ID,
+					Message: fmt.Sprintf("link %s -[%s]-> %s targets an archived fact", f.ID, l.Relation, dst),
+					Info:    true, Src: f.ID, Dst: dst,
+				})
 				continue
 			}
 			if _, ok := byID[dst]; !ok {

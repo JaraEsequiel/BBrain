@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/JaraEsequiel/BBrain/internal/app"
+	"github.com/JaraEsequiel/BBrain/internal/index"
 )
 
 func toolByName(t *testing.T, name string) Tool {
@@ -91,6 +92,61 @@ func TestMemLinkWhyAndWikiBuild(t *testing.T) {
 	a.Runner = fakeBuildRunner{out: `{"pages":[{"slug":"auth","category":"decisions","title":"Auth","sources":["` + id1 + `"],"body":"# Auth","change_reason":"x"}]}`}
 	if wb := call(t, a, "wiki_build", `{}`); !strings.Contains(wb, "auth.md") {
 		t.Fatalf("wiki_build = %s", wb)
+	}
+}
+
+func TestMemGetFallsBackToArchiveTier(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	id := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"Old auth call","body":"legacy jwt","project":"p","scope":"project"}`))
+
+	// Active fact: response must be exactly as today — no "archived" key.
+	if g := call(t, a, "mem_get", `{"id":"`+id+`"}`); strings.Contains(g, "archived") {
+		t.Fatalf("active mem_get must not carry an archived key: %s", g)
+	}
+
+	if _, err := a.Store.Archive(id); err != nil {
+		t.Fatal(err)
+	}
+	g := call(t, a, "mem_get", `{"id":"`+id+`"}`)
+	if !strings.Contains(g, "Old auth call") || !strings.Contains(g, `"archived":true`) {
+		t.Fatalf("mem_get on archived id should return the fact with archived:true, got: %s", g)
+	}
+
+	// Unknown id still reports found:false.
+	if g := call(t, a, "mem_get", `{"id":"2026-01-01-nope"}`); !strings.Contains(g, `"found":false`) {
+		t.Fatalf("mem_get on missing id = %s", g)
+	}
+}
+
+func TestMemRelatedToleratesArchivedNeighbor(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	idA := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"Auth model","body":"jwt","project":"p","scope":"project"}`))
+	idB := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"Session storage","body":"redis","project":"p","scope":"project"}`))
+	call(t, a, "mem_link", `{"from":"`+idA+`","to":"`+idB+`","relation":"depends-on","why":"auth needs sessions"}`)
+
+	// Archive B the way App.Archive will: move the .md and drop B from the index.
+	if _, err := a.Store.Archive(idB); err != nil {
+		t.Fatal(err)
+	}
+	ix, err := index.Open(a.Brain.IndexPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ix.DeleteFact(idB); err != nil {
+		ix.Close()
+		t.Fatal(err)
+	}
+	ix.Close()
+
+	// The A→B edge is now dangling in `links` — mem_related must still return it.
+	if r := call(t, a, "mem_related", `{"id":"`+idA+`"}`); !strings.Contains(r, idB) {
+		t.Fatalf("mem_related should keep the edge to the archived fact %s, got: %s", idB, r)
 	}
 }
 

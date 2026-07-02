@@ -172,7 +172,7 @@ func TestAddLinkValidates(t *testing.T) {
 	}
 }
 
-func TestAddLinkBumpsUpdatedAtNotRevisionCount(t *testing.T) {
+func TestAddLinkDoesNotBumpUpdatedAtOrRevisionCount(t *testing.T) {
 	s := newTestStore(t)
 	src, err := s.Save(SaveInput{Type: "architecture", Title: "A", Body: "x", Project: "p", Scope: "project"})
 	if err != nil {
@@ -185,7 +185,7 @@ func TestAddLinkBumpsUpdatedAtNotRevisionCount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Link at a later, distinct timestamp so the bump is observable.
+	// Link at a later, distinct timestamp so an accidental bump would be observable.
 	linkTime := time.Date(2026, 6, 23, 9, 0, 0, 0, time.UTC)
 	s.Now = func() time.Time { return linkTime }
 	updated, err := s.AddLink(src.ID, dst.ID, "relates", "because")
@@ -193,13 +193,9 @@ func TestAddLinkBumpsUpdatedAtNotRevisionCount(t *testing.T) {
 		t.Fatalf("AddLink: %v", err)
 	}
 
-	// updated_at is bumped to the link time...
-	if want := linkTime.Format(time.RFC3339); updated.UpdatedAt != want {
-		t.Fatalf("updated_at = %q, want %q", updated.UpdatedAt, want)
-	}
-	// ...and it actually moved (the source was saved at the base time).
-	if updated.UpdatedAt == src.UpdatedAt {
-		t.Fatalf("updated_at was not bumped: still %q", updated.UpdatedAt)
+	// updated_at reflects content changes only; a link edit must not bump it.
+	if updated.UpdatedAt != src.UpdatedAt {
+		t.Fatalf("updated_at = %q, want %q (unchanged by link)", updated.UpdatedAt, src.UpdatedAt)
 	}
 	// revision_count is unchanged — a link edit is not a content revision.
 	if updated.RevisionCount != src.RevisionCount {
@@ -211,11 +207,46 @@ func TestAddLinkBumpsUpdatedAtNotRevisionCount(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("reload: ok=%v err=%v", ok, err)
 	}
-	if reloaded.UpdatedAt != updated.UpdatedAt {
-		t.Fatalf("persisted updated_at = %q, want %q", reloaded.UpdatedAt, updated.UpdatedAt)
+	if reloaded.UpdatedAt != src.UpdatedAt {
+		t.Fatalf("persisted updated_at = %q, want %q", reloaded.UpdatedAt, src.UpdatedAt)
 	}
 	if reloaded.RevisionCount != src.RevisionCount {
 		t.Fatalf("persisted revision_count = %d, want %d", reloaded.RevisionCount, src.RevisionCount)
+	}
+}
+
+func TestRemoveLinkDoesNotBumpUpdatedAt(t *testing.T) {
+	s := newTestStore(t)
+	a, err := s.Save(SaveInput{Type: "decision", Title: "Alpha", Body: "a", Project: "p", Scope: "project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.Save(SaveInput{Type: "decision", Title: "Beta", Body: "b", Project: "p", Scope: "project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddLink(a.ID, b.ID, "relates", "x"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Remove at a later, distinct timestamp so an accidental bump would be observable.
+	s.Now = func() time.Time { return time.Date(2026, 6, 23, 9, 0, 0, 0, time.UTC) }
+	got, removed, err := s.RemoveLink(a.ID, b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !removed {
+		t.Fatal("removed should be true after removing an existing link")
+	}
+	if got.UpdatedAt != a.UpdatedAt {
+		t.Fatalf("updated_at = %q, want %q (unchanged by link removal)", got.UpdatedAt, a.UpdatedAt)
+	}
+	reloaded, ok, err := s.Get(a.ID)
+	if err != nil || !ok {
+		t.Fatalf("reload: ok=%v err=%v", ok, err)
+	}
+	if reloaded.UpdatedAt != a.UpdatedAt {
+		t.Fatalf("persisted updated_at = %q, want %q", reloaded.UpdatedAt, a.UpdatedAt)
 	}
 }
 

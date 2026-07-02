@@ -245,6 +245,12 @@ func (a *App) WikiBuild(ctx context.Context, opts WikiBuildOptions) (wiki.BuildR
 		}
 		filtered = append(filtered, f)
 	}
+	// Citation universe: the whole archive tier, unfiltered — the project/scope
+	// filter only decides what gets distilled, not what pages may cite.
+	archived, err := a.Store.ListArchived()
+	if err != nil {
+		return wiki.BuildResult{}, err
+	}
 	if err := os.MkdirAll(a.Brain.WikiDir(), 0o755); err != nil {
 		return wiki.BuildResult{}, err
 	}
@@ -264,6 +270,7 @@ func (a *App) WikiBuild(ctx context.Context, opts WikiBuildOptions) (wiki.BuildR
 	return wiki.Build(ctx, wiki.BuildOptions{
 		WikiDir:    a.Brain.WikiDir(),
 		Facts:      filtered,
+		Archived:   archived,
 		Categories: cats,
 		Runner:     a.Runner,
 		Now:        a.Store.Now,
@@ -474,6 +481,188 @@ func (a *App) WikiLint(opts WikiLintOptions) (wiki.LintResult, error) {
 // Get returns a fact by id (ok=false if absent).
 func (a *App) Get(id string) (fact.Fact, bool, error) {
 	return a.Store.Get(id)
+}
+
+// GetArchived returns a fact from the archive tier by id (ok=false if absent).
+func (a *App) GetArchived(id string) (fact.Fact, bool, error) {
+	return a.Store.GetArchived(id)
+}
+
+// Archive moves a fact to the archive tier and drops it from the derived index
+// (FTS row + outgoing edges), so archived facts never surface in Search.
+// Incoming edges stay in the links table as dangling by design (mem_related
+// tolerates them).
+func (a *App) Archive(id string) (fact.Fact, error) {
+	f, err := a.Store.Archive(id)
+	if err != nil {
+		return fact.Fact{}, err
+	}
+	if err := a.ensureIndexDir(); err != nil {
+		return fact.Fact{}, err
+	}
+	ix, err := index.Open(a.Brain.IndexPath())
+	if err != nil {
+		return fact.Fact{}, err
+	}
+	defer ix.Close()
+	if err := ix.DeleteFact(id); err != nil {
+		return fact.Fact{}, err
+	}
+	return f, nil
+}
+
+// Unarchive moves a fact back to the active tier and re-indexes it (FTS row +
+// outgoing edges), so it surfaces in Search again.
+func (a *App) Unarchive(id string) (fact.Fact, error) {
+	f, err := a.Store.Unarchive(id)
+	if err != nil {
+		return fact.Fact{}, err
+	}
+	if err := a.ensureIndexDir(); err != nil {
+		return fact.Fact{}, err
+	}
+	ix, err := index.Open(a.Brain.IndexPath())
+	if err != nil {
+		return fact.Fact{}, err
+	}
+	defer ix.Close()
+	// PathFor points at the active tier — where the fact just returned to.
+	if err := ix.IndexFact(f, a.Store.PathFor(f)); err != nil {
+		return fact.Fact{}, err
+	}
+	if err := ix.IndexLinks(f); err != nil {
+		return fact.Fact{}, err
+	}
+	return f, nil
+}
+
+// ArchiveFilter selects which active facts qualify for archiving. Given filters
+// AND-compose; Types is an internal OR; IDs are explicit picks unioned into the
+// result. A fully empty filter is an error: archiving demands explicit selection.
+type ArchiveFilter struct {
+	Types     []string
+	OlderThan time.Duration // qualify when now - updated_at > OlderThan
+	Distilled bool          // qualify only when cited as a source by ≥1 wiki page
+	Project   string
+	IDs       []string
+}
+
+// ArchiveCandidate is one fact the plan selected, with why — or why not.
+type ArchiveCandidate struct {
+	Fact    fact.Fact
+	Reasons []string // e.g. ["type=session-summary", "older-than", "distilled"] or ["explicit"]
+	Skipped string   // non-empty => not archivable: "pinned" | "not found" | "already archived"
+}
+
+// matchesArchiveFilter reports whether f qualifies under every given filter,
+// returning the qualification reasons when it does.
+func matchesArchiveFilter(f fact.Fact, fl ArchiveFilter, distilled map[string]bool, now time.Time) ([]string, bool) {
+	var reasons []string
+	if len(fl.Types) > 0 {
+		matched := ""
+		for _, t := range fl.Types {
+			if f.Type == t {
+				matched = t
+				break
+			}
+		}
+		if matched == "" {
+			return nil, false
+		}
+		reasons = append(reasons, "type="+matched)
+	}
+	if fl.OlderThan > 0 {
+		ts, err := time.Parse(time.RFC3339, f.UpdatedAt)
+		// Unparseable updated_at never qualifies (fail-safe).
+		if err != nil || now.Sub(ts) <= fl.OlderThan {
+			return nil, false
+		}
+		reasons = append(reasons, "older-than")
+	}
+	if fl.Distilled {
+		if !distilled[f.ID] {
+			return nil, false
+		}
+		reasons = append(reasons, "distilled")
+	}
+	if fl.Project != "" {
+		if f.Project != fl.Project {
+			return nil, false
+		}
+		reasons = append(reasons, "project="+fl.Project)
+	}
+	return reasons, true
+}
+
+// PlanArchive computes the archive candidates for a filter without touching
+// disk or index — it is the dry-run. Result = filter matches ∪ explicit IDs
+// (deduped). Pinned facts never qualify via filters; an explicit pinned ID is
+// returned marked Skipped so the caller can report it.
+func (a *App) PlanArchive(fl ArchiveFilter) ([]ArchiveCandidate, error) {
+	hasFilter := len(fl.Types) > 0 || fl.OlderThan > 0 || fl.Distilled || fl.Project != ""
+	if !hasFilter && len(fl.IDs) == 0 {
+		return nil, fmt.Errorf("plan-archive: empty selection — pass at least one filter or explicit id")
+	}
+
+	var distilled map[string]bool
+	if fl.Distilled {
+		var err error
+		if distilled, err = wiki.SourceIDs(a.Brain.WikiDir()); err != nil {
+			return nil, err
+		}
+	}
+
+	now := a.Store.Now()
+	var out []ArchiveCandidate
+	planned := map[string]bool{}
+	if hasFilter {
+		facts, err := a.Store.ListFacts()
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range facts {
+			if f.Pinned {
+				continue // pinned is never a candidate via filters
+			}
+			reasons, ok := matchesArchiveFilter(f, fl, distilled, now)
+			if !ok {
+				continue
+			}
+			out = append(out, ArchiveCandidate{Fact: f, Reasons: reasons})
+			planned[f.ID] = true
+		}
+	}
+
+	for _, id := range fl.IDs {
+		if planned[id] {
+			continue // union: already selected by filters
+		}
+		planned[id] = true
+		if !fact.ValidID(id) {
+			out = append(out, ArchiveCandidate{Fact: fact.Fact{ID: id}, Skipped: "not found"})
+			continue
+		}
+		f, ok, err := a.Store.Get(id)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			skip := "not found"
+			if _, archived, aerr := a.Store.GetArchived(id); aerr != nil {
+				return nil, aerr
+			} else if archived {
+				skip = "already archived"
+			}
+			out = append(out, ArchiveCandidate{Fact: fact.Fact{ID: id}, Skipped: skip})
+			continue
+		}
+		if f.Pinned {
+			out = append(out, ArchiveCandidate{Fact: f, Skipped: "pinned"})
+			continue
+		}
+		out = append(out, ArchiveCandidate{Fact: f, Reasons: []string{"explicit"}})
+	}
+	return out, nil
 }
 
 // Delete removes a fact's .md and drops it from the derived index. Returns

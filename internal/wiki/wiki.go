@@ -286,6 +286,7 @@ const maxBatchAttempts = 3
 type BuildOptions struct {
 	WikiDir    string
 	Facts      []fact.Fact // already filtered by project/scope
+	Archived   []fact.Fact // citation universe only: never distilled, but citable by pages
 	Categories []string    // active category vocabulary
 	Runner     llm.Runner
 	Now        func() time.Time
@@ -408,6 +409,13 @@ func mergePage(dst *Page, add Page) {
 func Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
 	byID := map[string]fact.Fact{}
 	for _, f := range opts.Facts {
+		byID[f.ID] = f
+	}
+	// Archived facts join the citation universe (ValidatePage/DeriveBucket via
+	// byID) but never the distillation batches: chunkFacts/BuildPrompt below run
+	// on opts.Facts only, so a page citing an archived fact survives while the
+	// archived content costs zero prompt tokens.
+	for _, f := range opts.Archived {
 		byID[f.ID] = f
 	}
 	existing, err := readPages(opts.WikiDir)

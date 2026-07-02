@@ -722,6 +722,82 @@ func TestBuildDoesNotMergeDifferentBuckets(t *testing.T) {
 	}
 }
 
+// recordingRunner records every prompt and always returns the same output, so a
+// test can inspect exactly what went to the LLM across batches.
+type recordingRunner struct {
+	prompts []string
+	out     string
+}
+
+func (r *recordingRunner) Run(ctx context.Context, prompt string) (string, error) {
+	r.prompts = append(r.prompts, prompt)
+	return r.out, nil
+}
+
+// TestBuildArchivedOutOfBatchesButCitable: archived facts must NOT be distilled
+// (batches carry only opts.Facts => ceil(N/batchSize) LLM calls, and no archived
+// content reaches any prompt) but MUST remain citable: a page whose sources
+// include an archived id passes ValidatePage and DeriveBucket resolves the
+// bucket from the archived fact's scope/project.
+func TestBuildArchivedOutOfBatchesButCitable(t *testing.T) {
+	dir := t.TempDir()
+	var facts []fact.Fact
+	for i := 0; i < 25; i++ {
+		facts = append(facts, fact.Fact{ID: "act" + strconv.Itoa(i), Title: "T", Scope: "project", Project: "shopapp", Body: "active body"})
+	}
+	var archived []fact.Fact
+	for i := 0; i < 7; i++ {
+		archived = append(archived, fact.Fact{ID: "arch" + strconv.Itoa(i), Title: "OLD", Scope: "project", Project: "shopapp", Body: "ARCHIVED-BODY"})
+	}
+	// The runner re-emits a page citing an active AND an archived fact.
+	fr := &recordingRunner{out: `{"pages":[{"slug":"legacy","category":"decisions","title":"Legacy","sources":["act0","arch3"],"body":"b","change_reason":"x"}]}`}
+	res, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Archived: archived, Categories: DefaultCategories,
+		Runner: fr, Now: fixedNow, BatchSize: 10,
+	})
+	must(t, err)
+	// Exactly ceil(25/10) = 3 LLM calls: archived facts add zero batches.
+	if len(fr.prompts) != 3 {
+		t.Fatalf("LLM calls = %d, want 3 (archived facts must not add batches)", len(fr.prompts))
+	}
+	// No archived content in any prompt.
+	for i, p := range fr.prompts {
+		if strings.Contains(p, "ARCHIVED-BODY") || strings.Contains(p, "### arch") {
+			t.Fatalf("prompt %d leaks archived fact content:\n%s", i, p)
+		}
+	}
+	// The page citing arch3 is valid (not dropped as InvalidPage)...
+	if len(res.InvalidPages) != 0 {
+		t.Fatalf("invalidPages = %+v, want none (archived ids are citable)", res.InvalidPages)
+	}
+	// ...and DeriveBucket resolved projects/shopapp from the archived fact's
+	// scope/project (with arch3 missing from byID it would fall back to global).
+	rel := "projects/shopapp/decisions/legacy.md"
+	if len(res.Written) != 1 || res.Written[0] != rel {
+		t.Fatalf("written = %+v, want [%s]", res.Written, rel)
+	}
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
+		t.Fatalf("page not written: %v", err)
+	}
+}
+
+// TestBuildNilArchivedUnchanged: no archive tier (Archived nil) behaves exactly
+// as before — same writes, same result shape (no-regression for vaults without
+// raws/archive/).
+func TestBuildNilArchivedUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	facts := []fact.Fact{{ID: "f1", Title: "F", Project: "shopapp", Scope: "project", Body: "b"}}
+	fr := &fakeRunner{out: `{"pages":[{"slug":"ok","category":"decisions","title":"T","sources":["f1"],"body":"b","change_reason":"x"}]}`}
+	res, err := Build(context.Background(), BuildOptions{
+		WikiDir: dir, Facts: facts, Archived: nil, Categories: DefaultCategories, Runner: fr, Now: fixedNow,
+	})
+	must(t, err)
+	if len(res.Written) != 1 || res.Written[0] != "projects/shopapp/decisions/ok.md" ||
+		len(res.Skipped) != 0 || len(res.InvalidPages) != 0 {
+		t.Fatalf("res = %+v, want single page, no skips, no invalids", res)
+	}
+}
+
 func writePageRaw(t *testing.T, dir, rel, content string) {
 	t.Helper()
 	p := filepath.Join(dir, filepath.FromSlash(rel))

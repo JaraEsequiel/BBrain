@@ -401,6 +401,140 @@ func TestEndToEndWikiLintFix(t *testing.T) {
 	}
 }
 
+func TestWikiLintArchivedLinkIsInfoAndExitsZero(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("BBRAIN_HOME", home)
+	t.Setenv("BBRAIN_AGENT_CLI", "") // lint needs no agent
+	var out, errOut bytes.Buffer
+
+	if code := run([]string{"init"}, &out, &errOut); code != 0 {
+		t.Fatalf("init: %s", errOut.String())
+	}
+	save := func(title string) string {
+		out.Reset()
+		errOut.Reset()
+		if code := run([]string{"save", "--title", title, "--project", "p", "--type", "decision", "--body", "b"}, &out, &errOut); code != 0 {
+			t.Fatalf("save: %s", errOut.String())
+		}
+		return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out.String()), "saved "))
+	}
+	x := save("Alpha")
+	y := save("Beta")
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"link", "--from", x, "--to", y, "--relation", "relates", "--why", "x"}, &out, &errOut); code != 0 {
+		t.Fatalf("link: %s", errOut.String())
+	}
+	// Archive y by moving its file to the archive tier (rename semantics, story-01).
+	if err := os.MkdirAll(filepath.Join(home, "raws", "archive"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(home, "raws", "facts", y+".md"),
+		filepath.Join(home, "raws", "archive", y+".md")); err != nil {
+		t.Fatal(err)
+	}
+
+	// The only finding is informative -> printed with "info: " prefix, exit 0.
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"wiki", "lint"}, &out, &errOut); code != 0 {
+		t.Fatalf("wiki lint exit = %d, want 0; out=%q err=%q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "info: archived-link") {
+		t.Fatalf("lint report = %q", out.String())
+	}
+
+	// --fix must NOT remove the active->archived link.
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"wiki", "lint", "--fix"}, &out, &errOut); code != 0 {
+		t.Fatalf("wiki lint --fix exit = %d, want 0; out=%q err=%q", code, out.String(), errOut.String())
+	}
+	b, err := os.ReadFile(filepath.Join(home, "raws", "facts", x+".md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), y) {
+		t.Fatalf("--fix dropped the link to the archived fact:\n%s", b)
+	}
+}
+
+// An archived-link (informative) must not mask a real, non-info issue in the
+// same run: the exit code has to reflect the real issue, not just the
+// info-only case.
+func TestWikiLintMixedArchivedAndRealIssueExitsNonZero(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("BBRAIN_HOME", home)
+	t.Setenv("BBRAIN_AGENT_CLI", "")
+	var out, errOut bytes.Buffer
+
+	if code := run([]string{"init"}, &out, &errOut); code != 0 {
+		t.Fatalf("init: %s", errOut.String())
+	}
+	save := func(title string) string {
+		out.Reset()
+		errOut.Reset()
+		if code := run([]string{"save", "--title", title, "--project", "p", "--type", "decision", "--body", "b"}, &out, &errOut); code != 0 {
+			t.Fatalf("save: %s", errOut.String())
+		}
+		return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out.String()), "saved "))
+	}
+	x := save("Alpha")
+	y := save("Beta")
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"link", "--from", x, "--to", y, "--relation", "relates", "--why", "x"}, &out, &errOut); code != 0 {
+		t.Fatalf("link: %s", errOut.String())
+	}
+	// Archive y: leaves an informative archived-link on x->y.
+	if err := os.MkdirAll(filepath.Join(home, "raws", "archive"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(home, "raws", "facts", y+".md"),
+		filepath.Join(home, "raws", "archive", y+".md")); err != nil {
+		t.Fatal(err)
+	}
+	// A real dangling-link: x -> an id that exists in neither tier.
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"link", "--from", x, "--to", "does-not-exist", "--relation", "relates", "--why", "x"}, &out, &errOut); code == 0 {
+		t.Fatalf("expected link to a nonexistent fact to fail, got exit 0: %s", out.String())
+	}
+	// link validates existence up front, so forge the dangling edge directly
+	// on disk instead — that's the only way to get a real dangling-link past
+	// the CLI's own guard.
+	xPath := filepath.Join(home, "raws", "facts", x+".md")
+	b, err := os.ReadFile(xPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Match the existing list item's indentation (4/6 spaces, as written by
+	// the store) and append after it rather than splicing into the middle
+	// of the "links:" block, so the YAML stays well-formed.
+	marker := "      why: x\n"
+	patched := strings.Replace(string(b), marker,
+		marker+"    - target: '[[does-not-exist]]'\n      relation: relates\n      why: x\n", 1)
+	if patched == string(b) {
+		t.Fatalf("could not patch links: block into %s", xPath)
+	}
+	if err := os.WriteFile(xPath, []byte(patched), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out.Reset()
+	errOut.Reset()
+	code := run([]string{"wiki", "lint"}, &out, &errOut)
+	if code == 0 {
+		t.Fatalf("wiki lint exit = 0, want non-zero when a real dangling-link coexists with an archived-link; out=%q", out.String())
+	}
+	if !strings.Contains(out.String(), "info: archived-link") {
+		t.Fatalf("lint report missing archived-link: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "dangling-link") || strings.Contains(out.String(), "info: dangling-link") {
+		t.Fatalf("lint report missing a non-info dangling-link: %q", out.String())
+	}
+}
+
 func TestEndToEndInstallUninstallProject(t *testing.T) {
 	home := t.TempDir()
 	proj := t.TempDir()

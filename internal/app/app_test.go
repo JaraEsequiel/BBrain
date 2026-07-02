@@ -13,6 +13,7 @@ import (
 	"github.com/JaraEsequiel/BBrain/internal/fact"
 	"github.com/JaraEsequiel/BBrain/internal/index"
 	"github.com/JaraEsequiel/BBrain/internal/store"
+	"github.com/JaraEsequiel/BBrain/internal/wiki"
 )
 
 func TestSaveThenSearch(t *testing.T) {
@@ -396,6 +397,74 @@ func TestWikiLintReportsAndFixes(t *testing.T) {
 	got, _, _ := a.Store.Get(x.ID)
 	if len(got.Links) != 0 {
 		t.Fatalf("link not dropped: %+v", got.Links)
+	}
+}
+
+func TestWikiLintFixKeepsArchivedLinks(t *testing.T) {
+	a := New(t.TempDir())
+	must(t, a.Init())
+	x, err := a.Save(store.SaveInput{Type: "decision", Title: "Alpha", Body: "a", Project: "p", Scope: "project"})
+	must(t, err)
+	y, err := a.Save(store.SaveInput{Type: "decision", Title: "Beta", Body: "b", Project: "p", Scope: "project"})
+	must(t, err)
+	if _, err := a.Link(x.ID, y.ID, "relates", "x"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Archive(y.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := a.WikiLint(WikiLintOptions{Fix: true})
+	must(t, err)
+	if len(res.Fixed) != 0 {
+		t.Fatalf("--fix removed an active->archived link: %+v", res.Fixed)
+	}
+	found := false
+	for _, is := range res.Issues {
+		if is.Kind == "archived-link" && is.Info && !is.Fixable && is.Src == x.ID && is.Dst == y.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("archived-link not reported:\n%+v", res.Issues)
+	}
+	got, _, _ := a.Store.Get(x.ID)
+	if len(got.Links) != 1 {
+		t.Fatalf("link to archived fact was dropped: %+v", got.Links)
+	}
+}
+
+func TestWikiLintSameNonInfoIssuesAfterArchive(t *testing.T) {
+	a := New(t.TempDir())
+	must(t, a.Init())
+	f, err := a.Save(store.SaveInput{Type: "decision", Title: "Alpha", Body: "a", Project: "p", Scope: "project"})
+	must(t, err)
+	// A page citing f, plus a deliberate archive-independent non-info issue
+	// (invalid category). generated_at is in the future so the page is never stale.
+	gen := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	page := "---\ntitle: T\ncategory: nope\nsources:\n  - " + f.ID + "\ngenerated_at: " + gen + "\n---\n\n# T\n\nsee [[" + f.ID + "]]\n"
+	dir := filepath.Join(a.Brain.WikiDir(), "global", "nope")
+	must(t, os.MkdirAll(dir, 0o755))
+	must(t, os.WriteFile(filepath.Join(dir, "pg.md"), []byte(page), 0o644))
+
+	nonInfo := func() []wiki.Issue {
+		res, err := a.WikiLint(WikiLintOptions{})
+		must(t, err)
+		var out []wiki.Issue
+		for _, is := range res.Issues {
+			if !is.Info {
+				out = append(out, is)
+			}
+		}
+		return out
+	}
+	before := nonInfo()
+	if _, err := a.Archive(f.ID); err != nil {
+		t.Fatal(err)
+	}
+	after := nonInfo()
+	if len(before) != len(after) {
+		t.Fatalf("non-info issues changed after archive:\nbefore=%+v\nafter=%+v", before, after)
 	}
 }
 

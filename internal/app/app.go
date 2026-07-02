@@ -430,9 +430,11 @@ type WikiLintOptions struct {
 	Fix        bool
 }
 
-// WikiLint runs the deterministic consistency checks over the whole brain. With
-// Fix, it drops dangling fact links (via RemoveLink) and always regenerates the
-// derived wiki/index.md; everything else is reported for the human to resolve.
+// WikiLint runs the deterministic consistency checks over the whole brain,
+// resolving references against both the active and archived tiers. With Fix, it
+// drops dangling fact links (via RemoveLink) and always regenerates the derived
+// wiki/index.md; everything else — including informative archived-link issues,
+// which are never fixable — is reported for the human to resolve.
 func (a *App) WikiLint(opts WikiLintOptions) (wiki.LintResult, error) {
 	facts, err := a.Store.ListFacts()
 	if err != nil {
@@ -447,7 +449,11 @@ func (a *App) WikiLint(opts WikiLintOptions) (wiki.LintResult, error) {
 			valid[c] = true
 		}
 	}
-	issues, err := wiki.Lint(a.Brain.WikiDir(), facts, valid)
+	archived, err := a.Store.ListArchived()
+	if err != nil {
+		return wiki.LintResult{}, err
+	}
+	issues, err := wiki.Lint(a.Brain.WikiDir(), facts, archived, valid)
 	if err != nil {
 		return wiki.LintResult{}, err
 	}

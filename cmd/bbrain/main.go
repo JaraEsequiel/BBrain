@@ -435,10 +435,16 @@ func cmdWikiLint(args []string, stdout, stderr io.Writer) int {
 	for _, is := range res.Fixed {
 		fmt.Fprintf(stdout, "fixed: %s — %s\n", is.Kind, is.Message)
 	}
+	failures := 0
 	for _, is := range res.Issues {
+		if is.Info {
+			fmt.Fprintf(stdout, "info: %s: %s — %s\n", is.Kind, is.Location, is.Message)
+			continue
+		}
+		failures++
 		fmt.Fprintf(stdout, "%s: %s — %s\n", is.Kind, is.Location, is.Message)
 	}
-	if len(res.Issues) > 0 {
+	if failures > 0 {
 		return 1
 	}
 	return 0

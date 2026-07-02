@@ -127,6 +127,46 @@ func TestReadPagesMissingDir(t *testing.T) {
 	}
 }
 
+func TestSourceIDs(t *testing.T) {
+	dir := t.TempDir()
+	// writePage cites f0..f(n-1): both pages cite f0/f1, so the union dedups them.
+	writePage(t, dir, "projects/shopapp/decisions/auth.md", "Auth", "decisions", 2)
+	writePage(t, dir, "global/people/maria.md", "Maria", "people", 3)
+	must(t, os.WriteFile(filepath.Join(dir, "index.md"), []byte("# Wiki Index\n"), 0o644))
+	must(t, os.WriteFile(filepath.Join(dir, "log.md"), []byte("# Wiki Log\n"), 0o644))
+	ids, err := SourceIDs(dir)
+	must(t, err)
+	want := map[string]bool{"f0": true, "f1": true, "f2": true}
+	if len(ids) != len(want) {
+		t.Fatalf("ids = %v, want %v", ids, want)
+	}
+	for id := range want {
+		if !ids[id] {
+			t.Fatalf("ids = %v, missing %s", ids, id)
+		}
+	}
+}
+
+func TestSourceIDsMissingDir(t *testing.T) {
+	ids, err := SourceIDs(filepath.Join(t.TempDir(), "nope"))
+	must(t, err)
+	if ids == nil || len(ids) != 0 {
+		t.Fatalf("ids = %v, want empty non-nil map", ids)
+	}
+}
+
+func TestSourceIDsBadFrontmatter(t *testing.T) {
+	dir := t.TempDir()
+	rel := "global/concepts/broken.md"
+	p := filepath.Join(dir, filepath.FromSlash(rel))
+	must(t, os.MkdirAll(filepath.Dir(p), 0o755))
+	must(t, os.WriteFile(p, []byte("no frontmatter here\n"), 0o644))
+	_, err := SourceIDs(dir)
+	if err == nil || !strings.Contains(err.Error(), rel) {
+		t.Fatalf("err = %v, want error mentioning %s", err, rel)
+	}
+}
+
 func TestRegenerateIndex(t *testing.T) {
 	dir := t.TempDir()
 	writePage(t, dir, "projects/shopapp/decisions/auth.md", "Auth", "decisions", 1)

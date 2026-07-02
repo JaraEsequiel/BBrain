@@ -189,6 +189,26 @@ func readPages(wikiDir string) ([]pageOnDisk, error) {
 	return out, nil
 }
 
+// SourceIDs returns the set of fact IDs cited in the sources frontmatter of at
+// least one wiki page under wikiDir. A missing wikiDir yields an empty map.
+func SourceIDs(wikiDir string) (map[string]bool, error) {
+	pages, err := readPages(wikiDir)
+	if err != nil {
+		return nil, err
+	}
+	ids := map[string]bool{}
+	for _, pg := range pages {
+		meta, err := ParsePageMeta(pg.Content)
+		if err != nil {
+			return nil, fmt.Errorf("sources: %s: %w", pg.RelPath, err)
+		}
+		for _, id := range meta.Sources {
+			ids[id] = true
+		}
+	}
+	return ids, nil
+}
+
 // RegenerateIndex rewrites wiki/index.md as a catalog of every page, grouped by
 // bucket. It is derived: BBrain reconstructs it by scanning wiki/.
 func RegenerateIndex(wikiDir string) error {

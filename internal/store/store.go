@@ -172,8 +172,8 @@ func (s *Store) Get(id string) (fact.Fact, bool, error) {
 // fact's .md frontmatter. Both facts must exist and relation must be in the
 // controlled vocabulary; why is mandatory. If a link to dstID already exists, its
 // relation and why are overwritten in place (no duplicate edge). The source .md is
-// rewritten atomically and its updated_at is bumped; revision_count is left
-// untouched because a link edit is not a content revision.
+// rewritten atomically; updated_at and revision_count are left untouched because a
+// link edit is not a content revision — updated_at reflects content changes only.
 func (s *Store) AddLink(srcID, dstID, relation, why string) (fact.Fact, error) {
 	if !fact.ValidRelation(relation) {
 		return fact.Fact{}, fmt.Errorf("store: invalid relation %q", relation)
@@ -210,7 +210,6 @@ func (s *Store) AddLink(srcID, dstID, relation, why string) (fact.Fact, error) {
 			Why:      why,
 		})
 	}
-	src.UpdatedAt = s.Now().UTC().Format(time.RFC3339)
 	if err := s.write(src); err != nil {
 		return fact.Fact{}, err
 	}
@@ -219,8 +218,9 @@ func (s *Store) AddLink(srcID, dstID, relation, why string) (fact.Fact, error) {
 
 // RemoveLink removes any reasoned wikilink from srcID to dstID on the source
 // fact's .md. It is a no-op (returning the unchanged fact) when no such link
-// exists. The source .md is rewritten atomically and updated_at is bumped only
-// when a link was actually removed.
+// exists. The source .md is rewritten atomically; updated_at is left untouched
+// because a link edit is not a content revision — updated_at reflects content
+// changes only.
 func (s *Store) RemoveLink(srcID, dstID string) (fact.Fact, bool, error) {
 	src, ok, err := s.Get(srcID)
 	if err != nil {
@@ -242,7 +242,6 @@ func (s *Store) RemoveLink(srcID, dstID string) (fact.Fact, bool, error) {
 		return src, false, nil
 	}
 	src.Links = kept
-	src.UpdatedAt = s.Now().UTC().Format(time.RFC3339)
 	if err := s.write(src); err != nil {
 		return fact.Fact{}, false, err
 	}

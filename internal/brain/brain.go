@@ -17,6 +17,7 @@ type Brain struct {
 func New(root string) Brain { return Brain{Root: root} }
 
 func (b Brain) FactsDir() string    { return filepath.Join(b.Root, "raws", "facts") }
+func (b Brain) ArchiveDir() string  { return filepath.Join(b.Root, "raws", "archive") }
 func (b Brain) UserRawsDir() string { return filepath.Join(b.Root, "raws", "user-raws") }
 func (b Brain) WikiDir() string     { return filepath.Join(b.Root, "wiki") }
 func (b Brain) IndexPath() string   { return filepath.Join(b.Root, ".bbrain", "index.db") }

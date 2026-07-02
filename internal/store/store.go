@@ -122,7 +122,17 @@ func (s *Store) write(f fact.Fact) error {
 
 // ListFacts parses every .md file directly under the brain's facts dir.
 func (s *Store) ListFacts() ([]fact.Fact, error) {
-	dir := s.Brain.FactsDir()
+	return listDir(s.Brain.FactsDir())
+}
+
+// ListArchived parses every .md file directly under the brain's archive dir.
+// An absent dir yields (nil, nil), same as ListFacts.
+func (s *Store) ListArchived() ([]fact.Fact, error) {
+	return listDir(s.Brain.ArchiveDir())
+}
+
+// listDir parses every .md file directly under dir; an absent dir is (nil, nil).
+func listDir(dir string) ([]fact.Fact, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -151,10 +161,19 @@ func (s *Store) ListFacts() ([]fact.Fact, error) {
 // Get loads a single fact by id. ok is false (with a nil error) when no .md with
 // that id exists under the brain's facts dir.
 func (s *Store) Get(id string) (fact.Fact, bool, error) {
+	return getFrom(s.Brain.FactsDir(), id)
+}
+
+// GetArchived is Get over the archive tier.
+func (s *Store) GetArchived(id string) (fact.Fact, bool, error) {
+	return getFrom(s.Brain.ArchiveDir(), id)
+}
+
+func getFrom(dir, id string) (fact.Fact, bool, error) {
 	if !fact.ValidID(id) {
 		return fact.Fact{}, false, fmt.Errorf("store: invalid fact id %q", id)
 	}
-	data, err := os.ReadFile(filepath.Join(s.Brain.FactsDir(), id+".md"))
+	data, err := os.ReadFile(filepath.Join(dir, id+".md"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fact.Fact{}, false, nil
@@ -166,6 +185,67 @@ func (s *Store) Get(id string) (fact.Fact, bool, error) {
 		return fact.Fact{}, false, err
 	}
 	return f, true, nil
+}
+
+// Archive moves a fact's .md from the active tier (raws/facts/) to the archive
+// tier (raws/archive/) with a bare os.Rename — content, updated_at and
+// revision_count stay byte-identical because moving is not a content revision
+// (same rule as AddLink). Pinned facts are never archived; an existing file at
+// the destination is never overwritten.
+func (s *Store) Archive(id string) (fact.Fact, error) {
+	f, ok, err := s.Get(id)
+	if err != nil {
+		return fact.Fact{}, err
+	}
+	if !ok {
+		if _, archived, aerr := s.GetArchived(id); aerr == nil && archived {
+			return fact.Fact{}, fmt.Errorf("store: fact %q is already archived", id)
+		}
+		return fact.Fact{}, fmt.Errorf("store: fact %q not found", id)
+	}
+	if f.Pinned {
+		return fact.Fact{}, fmt.Errorf("store: fact %q is pinned and cannot be archived", id)
+	}
+	if err := os.MkdirAll(s.Brain.ArchiveDir(), 0o755); err != nil {
+		return fact.Fact{}, err
+	}
+	dst := filepath.Join(s.Brain.ArchiveDir(), id+".md")
+	// ponytail: stat-then-rename has a TOCTOU window; fine for a single-process
+	// CLI/MCP — switch to renameat2(RENAME_NOREPLACE) if concurrent writers appear.
+	if _, err := os.Stat(dst); err == nil {
+		return fact.Fact{}, fmt.Errorf("store: archived file for %q already exists", id)
+	} else if !os.IsNotExist(err) {
+		return fact.Fact{}, err
+	}
+	if err := os.Rename(filepath.Join(s.Brain.FactsDir(), id+".md"), dst); err != nil {
+		return fact.Fact{}, err
+	}
+	return f, nil
+}
+
+// Unarchive moves a fact's .md back from the archive tier to the active tier,
+// again with a bare os.Rename. It never overwrites an existing active fact.
+func (s *Store) Unarchive(id string) (fact.Fact, error) {
+	f, ok, err := s.GetArchived(id)
+	if err != nil {
+		return fact.Fact{}, err
+	}
+	if !ok {
+		return fact.Fact{}, fmt.Errorf("store: fact %q not found in archive", id)
+	}
+	dst := filepath.Join(s.Brain.FactsDir(), id+".md")
+	if _, err := os.Stat(dst); err == nil {
+		return fact.Fact{}, fmt.Errorf("store: active fact %q already exists, refusing to overwrite", id)
+	} else if !os.IsNotExist(err) {
+		return fact.Fact{}, err
+	}
+	if err := os.MkdirAll(s.Brain.FactsDir(), 0o755); err != nil {
+		return fact.Fact{}, err
+	}
+	if err := os.Rename(filepath.Join(s.Brain.ArchiveDir(), id+".md"), dst); err != nil {
+		return fact.Fact{}, err
+	}
+	return f, nil
 }
 
 // AddLink adds (or updates) a reasoned wikilink from srcID to dstID on the source

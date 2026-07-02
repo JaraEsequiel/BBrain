@@ -138,10 +138,21 @@ func handleMemGet(ctx context.Context, a *app.App, raw json.RawMessage) (any, er
 	if err != nil {
 		return nil, err
 	}
+	if ok {
+		return factView(f), nil
+	}
+	// Not active — fall back to the archive tier (Q2): archived is "out of the
+	// way", not unreachable. Active responses stay byte-identical to today.
+	f, ok, err = a.GetArchived(in.ID)
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		return map[string]any{"found": false}, nil
 	}
-	return factView(f), nil
+	view := factView(f)
+	view["archived"] = true
+	return view, nil
 }
 
 func handleMemDelete(ctx context.Context, a *app.App, raw json.RawMessage) (any, error) {

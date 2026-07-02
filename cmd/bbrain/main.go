@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,7 +48,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func runWithIn(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates|wiki|install|uninstall|context|prompt-submit|watch|vault|mcp> [args]")
+		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates|wiki|mem|install|uninstall|context|prompt-submit|watch|vault|mcp> [args]")
 		return 2
 	}
 	switch args[0] {
@@ -85,6 +86,8 @@ func runWithIn(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdCandidates(args[1:], stdout, stderr)
 	case "wiki":
 		return cmdWiki(args[1:], stdout, stderr)
+	case "mem":
+		return cmdMem(args[1:], stdout, stderr)
 	case "install":
 		return cmdInstall(args[1:], stdin, stdout, stderr)
 	case "uninstall":
@@ -445,6 +448,166 @@ func cmdWikiLint(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s: %s — %s\n", is.Kind, is.Location, is.Message)
 	}
 	if failures > 0 {
+		return 1
+	}
+	return 0
+}
+
+// stringSlice implements flag.Value for a repeatable string flag (e.g. --type
+// used more than once), which the stdlib flag package does not provide.
+type stringSlice []string
+
+func (s *stringSlice) String() string     { return strings.Join(*s, ",") }
+func (s *stringSlice) Set(v string) error { *s = append(*s, v); return nil }
+
+// parseDur parses a duration for --older-than: an "Nd" suffix means N days
+// (time.ParseDuration has no day unit); anything else falls through to
+// time.ParseDuration ("720h", "30m", ...).
+func parseDur(s string) (time.Duration, error) {
+	if strings.HasSuffix(s, "d") {
+		n, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
+		if err != nil {
+			return 0, fmt.Errorf("invalid duration %q: %v", s, err)
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(s)
+}
+
+func cmdMem(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "mem: usage: bbrain mem <archive|unarchive> [args]")
+		return 2
+	}
+	switch args[0] {
+	case "archive":
+		return cmdMemArchive(args[1:], stdout, stderr)
+	case "unarchive":
+		return cmdMemUnarchive(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "mem: unknown subcommand %q\n", args[0])
+		return 2
+	}
+}
+
+func cmdMemArchive(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("mem archive", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var types stringSlice
+	fs.Var(&types, "type", "fact type to select (repeatable)")
+	olderThan := fs.String("older-than", "", "select facts not updated in this long (e.g. 30d, 720h)")
+	distilled := fs.Bool("distilled", false, "select only facts cited by >=1 wiki page")
+	project := fs.String("project", "", "select only facts in this project")
+	apply := fs.Bool("apply", false, "archive the candidates (default: dry-run, prints the plan)")
+	home := fs.String("home", "", "brain home (default: resolved brain root)")
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: bbrain mem archive [--type T]... [--older-than DUR] [--distilled] [--project P] [--apply] [--home DIR] [id...]")
+		fmt.Fprintln(stderr, "  recommended combo: bbrain mem archive --distilled --type session-summary --older-than 30d")
+		fmt.Fprintln(stderr, "  flags must precede any explicit id (Go's flag parsing stops at the first positional arg)")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	var dur time.Duration
+	if *olderThan != "" {
+		var err error
+		dur, err = parseDur(*olderThan)
+		if err != nil {
+			fmt.Fprintf(stderr, "mem archive: --older-than: %v\n", err)
+			return 2
+		}
+	}
+	root := *home
+	if root == "" {
+		root = brainRoot()
+	}
+	a := app.New(root)
+	// Loud signal for the classic misconfiguration: a wrong/unset home resolves to
+	// a path with no brain, and the plan then runs against an empty vault, exiting 0
+	// silently (BBRAIN_HOME unset -> brainRoot() -> ~/.bbrain/default).
+	if _, err := os.Stat(a.Brain.FactsDir()); os.IsNotExist(err) {
+		fmt.Fprintf(stderr, "mem archive: warning: no brain at %q (facts dir missing); nothing will be selected until --home/BBRAIN_HOME points at a real brain or `bbrain init` runs there\n", root)
+	}
+
+	candidates, err := a.PlanArchive(app.ArchiveFilter{
+		Types: types, OlderThan: dur, Distilled: *distilled, Project: *project, IDs: fs.Args(),
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "mem archive: %v\n", err)
+		return 2
+	}
+
+	var toArchive []app.ArchiveCandidate
+	for _, c := range candidates {
+		if c.Skipped == "" {
+			toArchive = append(toArchive, c)
+		}
+	}
+
+	if !*apply {
+		fmt.Fprintf(stdout, "[dry-run] would archive %d fact(s); run with --apply\n", len(toArchive))
+		for _, c := range candidates {
+			if c.Skipped != "" {
+				fmt.Fprintf(stdout, "skip %s: %s\n", c.Fact.ID, c.Skipped)
+				continue
+			}
+			fmt.Fprintf(stdout, "%s\t%s\t%s\n", c.Fact.ID, c.Fact.Type, strings.Join(c.Reasons, ","))
+		}
+		return 0
+	}
+
+	failed := 0
+	for _, c := range candidates {
+		if c.Skipped != "" {
+			fmt.Fprintf(stdout, "skip %s: %s\n", c.Fact.ID, c.Skipped)
+			continue
+		}
+		if _, err := a.Archive(c.Fact.ID); err != nil {
+			fmt.Fprintf(stderr, "mem archive: %s: %v\n", c.Fact.ID, err)
+			failed++
+			continue
+		}
+		fmt.Fprintf(stdout, "archived %s\n", c.Fact.ID)
+	}
+	fmt.Fprintf(stdout, "archived %d fact(s)\n", len(toArchive)-failed)
+	if failed > 0 {
+		return 1
+	}
+	return 0
+}
+
+func cmdMemUnarchive(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("mem unarchive", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	home := fs.String("home", "", "brain home (default: resolved brain root)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	ids := fs.Args()
+	if len(ids) == 0 {
+		fmt.Fprintln(stderr, "mem unarchive: usage: bbrain mem unarchive [--home DIR] <id>...")
+		return 2
+	}
+	root := *home
+	if root == "" {
+		root = brainRoot()
+	}
+	a := app.New(root)
+	if _, err := os.Stat(a.Brain.FactsDir()); os.IsNotExist(err) {
+		fmt.Fprintf(stderr, "mem unarchive: warning: no brain at %q (facts dir missing); nothing will be restored until --home/BBRAIN_HOME points at a real brain or `bbrain init` runs there\n", root)
+	}
+
+	failed := 0
+	for _, id := range ids {
+		if _, err := a.Unarchive(id); err != nil {
+			fmt.Fprintf(stderr, "mem unarchive: %s: %v\n", id, err)
+			failed++
+			continue
+		}
+		fmt.Fprintf(stdout, "unarchived %s\n", id)
+	}
+	if failed > 0 {
 		return 1
 	}
 	return 0

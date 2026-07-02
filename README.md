@@ -113,10 +113,53 @@ Root = `$BBRAIN_HOME` (default `~/.bbrain/default`):
 
 ```
 raws/facts/      atomic memories as .md (frontmatter: type/scope/project/topic_key/tags/links)
+raws/archive/    archived facts — same .md, out of the active tier (see "Archiving facts")
 raws/user-raws/  your own raw notes
 wiki/            distilled pages + index.md (catalog) + log.md (ingest/lint log)
 .bbrain/         derived FTS index (index.db) — rebuildable, never a source of truth
 ```
+
+## Archiving facts
+
+A vault accumulates episodic facts without bound — session summaries, routine
+run logs — and once the wiki has distilled one into a page, its individual
+recall value drops close to zero while it keeps costing you: it clutters
+`mem_search`, and it adds to the batch of facts `wiki build` has to re-process
+every run.
+
+**Archiving** is the middle ground between keeping the noise and `mem_delete`
+(which is lossy and irreversible). An archived fact is the same `.md` file,
+moved to `raws/archive/` — nothing is rewritten, nothing is deleted. It drops
+out of `mem_search` and out of `wiki build`'s distillation batches, but stays
+fully resolvable: a wiki page that cites it, or a link that points at it, keeps
+working, and `unarchive` restores it byte-for-byte.
+
+```sh
+# 1. See what would be archived — dry-run is the default, nothing is touched.
+bbrain mem archive --distilled --type session-summary --older-than 30d
+
+# 2. Happy with the plan? Re-run with --apply to actually move the files.
+bbrain mem archive --distilled --type session-summary --older-than 30d --apply
+
+# Bring a fact back — restores it to raws/facts/ and re-indexes it.
+bbrain mem unarchive <fact-id>
+```
+
+`--type` (repeatable), `--older-than` (e.g. `30d`, `720h`) and `--project`
+narrow the candidates; `--distilled` restricts to facts cited by at least one
+wiki page (`sources:` in its frontmatter) — BBrain does not hardcode which
+fact types are "episodic", so combining these filters is how you tell it.
+Explicit fact IDs can be passed too. Pinned facts (`pinned: true`) are never
+archived.
+
+Two behaviors worth knowing:
+
+- `mem_get` (and `bbrain` internals that resolve a single fact by id) fall back
+  to the archive tier when a fact isn't found active, returning it with
+  `archived: true`.
+- A `save` with a `topic_key` only upserts against **active** facts — saving
+  with the `topic_key` of an archived fact creates a new fact rather than
+  reviving the old one.
 
 ## Architecture
 

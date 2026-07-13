@@ -120,11 +120,16 @@ func handleMemSearch(ctx context.Context, a *app.App, raw json.RawMessage) (any,
 	if in.Limit <= 0 {
 		in.Limit = 10
 	}
-	res, err := a.Search(in.Query, in.Limit)
+	res, stale, err := a.Search(in.Query, in.Limit)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"results": res}, nil
+	out := map[string]any{"results": res}
+	if stale {
+		out["stale"] = true
+		out["notice"] = "search index predates a schema change and hasn't been reindexed (run `bbrain reindex`) — results may be incomplete"
+	}
+	return out, nil
 }
 
 func handleMemGet(ctx context.Context, a *app.App, raw json.RawMessage) (any, error) {

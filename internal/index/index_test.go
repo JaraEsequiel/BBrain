@@ -1,6 +1,7 @@
 package index
 
 import (
+	"database/sql"
 	"testing"
 
 	"github.com/JaraEsequiel/BBrain/internal/fact"
@@ -276,6 +277,160 @@ func TestResetRecreatesSchema(t *testing.T) {
 	// ...and leaves a usable, current-schema table behind.
 	if err := ix.IndexFact(fact.Fact{ID: "b", Project: "P", UpdatedAt: "2026-06-24T11:00:00Z"}, "b.md"); err != nil {
 		t.Fatalf("IndexFact after Reset: %v", err)
+	}
+}
+
+func TestSearchMatchesStemmedTerm(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("f1", "Archive old sessions", "cleanup task for the vault", "task", "p"), "/x/f1.md"))
+
+	res, err := ix.Search("archiving", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("Search(archiving) = %+v, want 1 match via porter stemming of \"archive\"", res)
+	}
+}
+
+func TestResetStampsSchemaVersion(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.Reset())
+
+	var version int
+	if err := ix.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatalf("PRAGMA user_version: %v", err)
+	}
+	if version != indexSchemaVersion {
+		t.Fatalf("user_version = %d, want %d", version, indexSchemaVersion)
+	}
+}
+
+func TestOpenDetectsStaleIndex(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/index.db"
+
+	// Build an index under the pre-porter (old) schema, with real content, and
+	// never stamp a schema version — simulates an on-disk index from before
+	// this change that hasn't been reindexed.
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	for _, stmt := range []string{
+		`CREATE VIRTUAL TABLE facts_fts USING fts5(fact_id UNINDEXED, path UNINDEXED, title, body, tags, topic_key, type UNINDEXED, scope UNINDEXED, project UNINDEXED, updated_at UNINDEXED, created_at UNINDEXED)`,
+		`INSERT INTO facts_fts(fact_id, path, title, body, tags, topic_key, type, scope, project, updated_at, created_at) VALUES ('f1', '/x/f1.md', 'Archive old sessions', 'cleanup', '', '', 'task', 'project', 'p', '', '')`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("exec %q: %v", stmt, err)
+		}
+	}
+	db.Close()
+
+	ix, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer ix.Close()
+
+	if !ix.Stale() {
+		t.Fatalf("Stale() = false, want true against a pre-porter on-disk index with content")
+	}
+}
+
+func TestOpenIgnoresFreshEmptyIndex(t *testing.T) {
+	ix, err := Open(t.TempDir() + "/index.db")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer ix.Close()
+
+	if ix.Stale() {
+		t.Fatalf("Stale() = true, want false — a brand-new empty index has nothing stale to warn about")
+	}
+}
+
+func TestSearchDoesNotOverstemDistinctWords(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("f1", "Use JWT for authentication", "stateless tokens", "note", "p"), "/x/f1.md"))
+	must(t, ix.IndexFact(sampleFact("f2", "Author guidelines for the changelog", "writing style notes", "note", "p"), "/x/f2.md"))
+
+	res, err := ix.Search("authentication", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 || res[0].Title != "Use JWT for authentication" {
+		t.Fatalf("Search(authentication) = %+v, want only the authentication fact — porter must not conflate authentication/author", res)
+	}
+}
+
+func TestPorterRegressionSet(t *testing.T) {
+	type seedFact struct{ id, title, body string }
+	corpus := []seedFact{
+		{"f1", "Migrating a schema change on the FTS5 index", "no ALTER ADD COLUMN available, drop and rebuild instead"},
+		{"f2", "mem_search fallback to SearchAny when AND returns zero", "the OR-based fallback search path for broad queries"},
+		{"f3", "Archiving old sessions from the vault", "cleanup task, not a deletion"},
+		{"f4", "Reindexing the vault after a schema change", "bbrain rebuilds facts_fts from disk"},
+		{"f5", "Decisión de arquitectura: usar SQLite embebido", "decisiones tomadas durante el diseño del proyecto"},
+		{"f6", "Use JWT for authenticating requests", "tokens instead of server-side sessions"},
+		{"f7", "Choosing Postgres over other relational databases", "chosen over SQLite for the main app"},
+		{"f8", "Testing strategies for the index package", "table-driven tests for buildMatch helpers"},
+	}
+
+	buildOld := func(t *testing.T) *Index {
+		t.Helper()
+		path := t.TempDir() + "/index.db"
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatalf("sql.Open: %v", err)
+		}
+		if _, err := db.Exec(`CREATE VIRTUAL TABLE facts_fts USING fts5(fact_id UNINDEXED, path UNINDEXED, title, body, tags, topic_key, type UNINDEXED, scope UNINDEXED, project UNINDEXED, updated_at UNINDEXED, created_at UNINDEXED)`); err != nil {
+			t.Fatalf("create old schema: %v", err)
+		}
+		old := &Index{db: db}
+		for _, f := range corpus {
+			must(t, old.IndexFact(sampleFact(f.id, f.title, f.body, "note", "p"), "/x/"+f.id+".md"))
+		}
+		return old
+	}
+
+	old := buildOld(t)
+	defer old.Close()
+	newIx := openMem(t)
+	for _, f := range corpus {
+		must(t, newIx.IndexFact(sampleFact(f.id, f.title, f.body, "note", "p"), "/x/"+f.id+".md"))
+	}
+
+	cases := []struct {
+		term    string
+		english bool // false = Spanish, exempt from the "strictly higher" bar (D3)
+	}{
+		{"migrate", true},
+		{"reindex", true},
+		{"archive", true},
+		{"authentication", true},
+		{"database", true},
+		{"test", true},
+		{"decisiones", false},
+		{"decisión", false},
+	}
+
+	for _, c := range cases {
+		oldRes, err := old.Search(c.term, 10)
+		if err != nil {
+			t.Fatalf("old.Search(%q): %v", c.term, err)
+		}
+		newRes, err := newIx.Search(c.term, 10)
+		if err != nil {
+			t.Fatalf("newIx.Search(%q): %v", c.term, err)
+		}
+
+		if len(newRes) < len(oldRes) {
+			t.Errorf("%q: porter recall %d < old recall %d — regression (AC-2)", c.term, len(newRes), len(oldRes))
+		}
+		if c.english && len(oldRes) == 0 && len(newRes) == 0 {
+			t.Errorf("%q: expected porter to find a stemmed match for this English inflected term (AC-3), got 0 under both tokenizers", c.term)
+		}
 	}
 }
 

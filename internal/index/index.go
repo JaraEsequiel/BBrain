@@ -5,6 +5,7 @@ package index
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -14,8 +15,15 @@ import (
 
 // Index wraps a SQLite connection holding the FTS5 facts table.
 type Index struct {
-	db *sql.DB
+	db    *sql.DB
+	stale bool
 }
+
+// indexSchemaVersion is bumped whenever facts_fts's schema changes in a way
+// that requires a reindex (e.g. a tokenizer change). Stamped via PRAGMA
+// user_version in Reset(); checked in Open() to detect a stale, un-reindexed
+// on-disk index (see isStale).
+const indexSchemaVersion = 1
 
 // schema: a single standalone FTS5 table. Searchable columns (title, body, tags,
 // topic_key) are tokenized; identifiers/filters (fact_id, path, type, scope,
@@ -32,7 +40,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
 	scope UNINDEXED,
 	project UNINDEXED,
 	updated_at UNINDEXED,
-	created_at UNINDEXED
+	created_at UNINDEXED,
+	tokenize = 'porter unicode61'
 );`
 
 // linksSchema is a plain (non-FTS) table mirroring each fact's reasoned wikilinks.
@@ -59,11 +68,42 @@ func Open(path string) (*Index, error) {
 			return nil, err
 		}
 	}
-	return &Index{db: db}, nil
+	stale, err := isStale(db)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Index{db: db, stale: stale}, nil
+}
+
+// isStale reports whether facts_fts holds content indexed under a schema
+// older than indexSchemaVersion. A version mismatch on an empty table means
+// "not yet reindexed since creation" — nothing stale to warn about — not
+// staleness; only a mismatch on a non-empty table is a real signal.
+func isStale(db *sql.DB) (bool, error) {
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return false, err
+	}
+	if version >= indexSchemaVersion {
+		return false, nil
+	}
+	var hasRows bool
+	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM facts_fts LIMIT 1)`).Scan(&hasRows); err != nil {
+		return false, err
+	}
+	return hasRows, nil
 }
 
 // Close closes the underlying database.
 func (ix *Index) Close() error { return ix.db.Close() }
+
+// Stale reports whether this Index was opened against an on-disk facts_fts
+// table indexed under an older schema (e.g. pre-porter tokenizer) that
+// hasn't been rebuilt via Reset()/bbrain reindex yet.
+func (ix *Index) Stale() bool {
+	return ix.stale
+}
 
 // IndexFact upserts a fact: it removes any existing row with the same fact_id
 // then inserts the current content.
@@ -213,13 +253,18 @@ func (ix *Index) Reset() error {
 		`DROP TABLE IF EXISTS facts_fts`,
 		`DROP TABLE IF EXISTS links`,
 		schema, linksSchema,
+		fmt.Sprintf(`PRAGMA user_version = %d`, indexSchemaVersion),
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
 			tx.Rollback()
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	ix.stale = false
+	return nil
 }
 
 // Result is one search hit.

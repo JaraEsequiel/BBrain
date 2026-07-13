@@ -68,11 +68,42 @@ func Open(path string) (*Index, error) {
 			return nil, err
 		}
 	}
-	return &Index{db: db}, nil
+	stale, err := isStale(db)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Index{db: db, stale: stale}, nil
+}
+
+// isStale reports whether facts_fts holds content indexed under a schema
+// older than indexSchemaVersion. A version mismatch on an empty table means
+// "not yet reindexed since creation" — nothing stale to warn about — not
+// staleness; only a mismatch on a non-empty table is a real signal.
+func isStale(db *sql.DB) (bool, error) {
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return false, err
+	}
+	if version >= indexSchemaVersion {
+		return false, nil
+	}
+	var hasRows bool
+	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM facts_fts LIMIT 1)`).Scan(&hasRows); err != nil {
+		return false, err
+	}
+	return hasRows, nil
 }
 
 // Close closes the underlying database.
 func (ix *Index) Close() error { return ix.db.Close() }
+
+// Stale reports whether this Index was opened against an on-disk facts_fts
+// table indexed under an older schema (e.g. pre-porter tokenizer) that
+// hasn't been rebuilt via Reset()/bbrain reindex yet.
+func (ix *Index) Stale() bool {
+	return ix.stale
+}
 
 // IndexFact upserts a fact: it removes any existing row with the same fact_id
 // then inserts the current content.

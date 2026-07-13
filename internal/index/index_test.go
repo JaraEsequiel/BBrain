@@ -1,6 +1,7 @@
 package index
 
 import (
+	"database/sql"
 	"testing"
 
 	"github.com/JaraEsequiel/BBrain/internal/fact"
@@ -302,6 +303,50 @@ func TestResetStampsSchemaVersion(t *testing.T) {
 	}
 	if version != indexSchemaVersion {
 		t.Fatalf("user_version = %d, want %d", version, indexSchemaVersion)
+	}
+}
+
+func TestOpenDetectsStaleIndex(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/index.db"
+
+	// Build an index under the pre-porter (old) schema, with real content, and
+	// never stamp a schema version — simulates an on-disk index from before
+	// this change that hasn't been reindexed.
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	for _, stmt := range []string{
+		`CREATE VIRTUAL TABLE facts_fts USING fts5(fact_id UNINDEXED, path UNINDEXED, title, body, tags, topic_key, type UNINDEXED, scope UNINDEXED, project UNINDEXED, updated_at UNINDEXED, created_at UNINDEXED)`,
+		`INSERT INTO facts_fts(fact_id, path, title, body, tags, topic_key, type, scope, project, updated_at, created_at) VALUES ('f1', '/x/f1.md', 'Archive old sessions', 'cleanup', '', '', 'task', 'project', 'p', '', '')`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("exec %q: %v", stmt, err)
+		}
+	}
+	db.Close()
+
+	ix, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer ix.Close()
+
+	if !ix.Stale() {
+		t.Fatalf("Stale() = false, want true against a pre-porter on-disk index with content")
+	}
+}
+
+func TestOpenIgnoresFreshEmptyIndex(t *testing.T) {
+	ix, err := Open(t.TempDir() + "/index.db")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer ix.Close()
+
+	if ix.Stale() {
+		t.Fatalf("Stale() = true, want false — a brand-new empty index has nothing stale to warn about")
 	}
 }
 

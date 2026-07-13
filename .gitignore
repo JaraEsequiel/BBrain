@@ -6,3 +6,10 @@
 
 # Design docs (specs/plans/research) are kept local, not tracked
 /docs/
+
+# Vexforge runtime artifacts — local, not shared (backlog/ is tracked)
+.dev-tools/requirements/
+.dev-tools/specs/
+.dev-tools/plans/
+.dev-tools/qa/
+.dev-tools/sdd/

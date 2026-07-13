@@ -56,4 +56,21 @@ The CLI (`cmd/bbrain/main.go`) is a thin dispatcher: each subcommand parses flag
 - **Stdlib-first, near-zero runtime deps** (only sqlite, yaml, atomic). Keep it that way.
 - Link relations are a fixed set: `relates | depends-on | conflicts-with | supersedes | scoped | compatible`. Every link needs a non-empty `why`.
 
+<!-- context-index:start -->
+## Project Context Index
+
+This index maps each facet of this repo to a context file under `.claude/context/`. Each file is
+the authoritative map of its facet — read it before working on that facet instead of re-deriving
+what it documents; if your assumptions conflict with a file, the file wins. One exception: these
+files are regenerated snapshots (`/vex:init-repo`), so for pinned versions and exact command
+strings the repo's own canonical sources (version-pin files and manifests) win on any conflict.
+
+- [Project Coding Stack](.claude/context/stack.md) — runtime, package manager, workspaces,
+  framework & test runner per workspace, canonical commands. **Read always**, before any
+  build/test/deps command.
+- [Architecture](.claude/context/architecture.md) — map of the repo's workspaces: what each
+  one does, dependency edges. **Read when** planning/implementing across workspaces or
+  deciding where code goes.
+<!-- context-index:end -->
+
 

@@ -290,16 +290,27 @@ func TestAcceptance_AC6_TC6_1_ExactTermMatchesStillHoldUnderPorter(t *testing.T)
 
 // TC-6.2 (negative): porter must not conflate distinct words that happen to
 // share a prefix (stemming false positive).
+//
+// NOTE: the plan's own Task 5/AC-6 fixture used "university"/"universe" for
+// this guard, on the untested assumption that porter wouldn't conflate them.
+// Empirically verified against SQLite FTS5's actual porter tokenizer (see
+// acceptance-test-author's re-dispatch report): it does conflate them, both
+// reducing to stem "univers" — this is a well-documented false positive of
+// the classic Porter (1980) algorithm, cited in Porter's own paper. Using
+// that pair here would make this test fail once Task 1 lands *doing exactly
+// what the plan says*, not because of a bug — an invalid guard. Replaced with
+// "authentication"/"author", empirically confirmed non-conflating under the
+// same tokenizer (see the re-dispatch report for the verification method).
 func TestAcceptance_AC6_TC6_2_PorterDoesNotOverstemDistinctWords(t *testing.T) {
 	ix := openMem(t)
-	must(t, ix.IndexFact(sampleFact("f1", "University roadmap", "campus planning", "note", "p"), "/x/f1.md"))
-	must(t, ix.IndexFact(sampleFact("f2", "Universe expansion theory", "cosmology notes", "note", "p"), "/x/f2.md"))
+	must(t, ix.IndexFact(sampleFact("f1", "Authentication roadmap", "JWT and session tokens", "note", "p"), "/x/f1.md"))
+	must(t, ix.IndexFact(sampleFact("f2", "Author guidelines document", "style and formatting notes", "note", "p"), "/x/f2.md"))
 
-	res, err := ix.Search("university", 10)
+	res, err := ix.Search("authentication", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
-	if len(res) != 1 || res[0].Title != "University roadmap" {
-		t.Fatalf("Search(university) = %+v, want only the University fact — porter must not conflate university/universe (AC-6 TC-6.2)", res)
+	if len(res) != 1 || res[0].Title != "Authentication roadmap" {
+		t.Fatalf("Search(authentication) = %+v, want only the Authentication fact — porter must not conflate authentication/author (AC-6 TC-6.2)", res)
 	}
 }

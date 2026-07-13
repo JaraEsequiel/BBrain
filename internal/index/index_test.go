@@ -292,6 +292,19 @@ func TestSearchMatchesStemmedTerm(t *testing.T) {
 	}
 }
 
+func TestResetStampsSchemaVersion(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.Reset())
+
+	var version int
+	if err := ix.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatalf("PRAGMA user_version: %v", err)
+	}
+	if version != indexSchemaVersion {
+		t.Fatalf("user_version = %d, want %d", version, indexSchemaVersion)
+	}
+}
+
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

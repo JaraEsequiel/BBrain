@@ -5,6 +5,7 @@ package index
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -14,8 +15,15 @@ import (
 
 // Index wraps a SQLite connection holding the FTS5 facts table.
 type Index struct {
-	db *sql.DB
+	db    *sql.DB
+	stale bool
 }
+
+// indexSchemaVersion is bumped whenever facts_fts's schema changes in a way
+// that requires a reindex (e.g. a tokenizer change). Stamped via PRAGMA
+// user_version in Reset(); checked in Open() to detect a stale, un-reindexed
+// on-disk index (see isStale).
+const indexSchemaVersion = 1
 
 // schema: a single standalone FTS5 table. Searchable columns (title, body, tags,
 // topic_key) are tokenized; identifiers/filters (fact_id, path, type, scope,
@@ -214,13 +222,18 @@ func (ix *Index) Reset() error {
 		`DROP TABLE IF EXISTS facts_fts`,
 		`DROP TABLE IF EXISTS links`,
 		schema, linksSchema,
+		fmt.Sprintf(`PRAGMA user_version = %d`, indexSchemaVersion),
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
 			tx.Rollback()
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	ix.stale = false
+	return nil
 }
 
 // Result is one search hit.

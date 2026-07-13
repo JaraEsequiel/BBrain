@@ -62,6 +62,32 @@ func TestSearchFallsBackToOrWhenAndFindsNothing(t *testing.T) {
 	}
 }
 
+// BBRAIN-4 AC-1 (fallback leg): a query matching neither fact's full AND-term
+// set forces the OR fallback; the project filter must still exclude
+// "vexforge" on that leg (design D3).
+func TestSearchFallsBackToOrRespectsProjectFilter(t *testing.T) {
+	a := New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{Title: "alpha beta", Body: "body", Type: "decision", Project: "bbrain"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{Title: "gamma delta", Body: "body", Type: "decision", Project: "vexforge"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	res, _, err := a.Search("alpha gamma", 10, "bbrain", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	for _, r := range res {
+		if r.Project != "bbrain" {
+			t.Fatalf("AC-1 fallback leaked unfiltered result: %+v", r)
+		}
+	}
+}
+
 func TestReindexRebuildsFromDisk(t *testing.T) {
 	a := New(t.TempDir())
 	if err := a.Init(); err != nil {
@@ -202,6 +228,75 @@ func TestCandidatesExcludesSelfAndLinked(t *testing.T) {
 	must(t, err)
 	if containsID(cands2, f2.ID) {
 		t.Fatalf("candidates must exclude an already-linked fact: %+v", cands2)
+	}
+}
+
+// BBRAIN-5 (Search browse): AC-1 project filter (title+id+type shape, no
+// body), AC-2 type filter, AC-3 no filter returns all facts, AC-4 zero-match
+// filter returns empty not an error, AC-6 empty-string project never leaks a
+// project-less "global" fact through.
+func TestBrowseFiltersByProjectStrictly(t *testing.T) {
+	a := New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{Title: "bbrain fact", Body: "b", Type: "decision", Project: "bbrain"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{Title: "vexforge fact", Body: "b", Type: "preference", Project: "vexforge"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{Title: "global fact", Body: "b", Type: "decision", Project: ""}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// AC-1: project filter returns only that project's facts, no full body in the shape
+	res, err := a.Browse("bbrain", "")
+	if err != nil {
+		t.Fatalf("Browse: %v", err)
+	}
+	if len(res) != 1 || res[0].Title != "bbrain fact" {
+		t.Fatalf("project filter: want only bbrain fact, got %+v", res)
+	}
+
+	// AC-6-TC-6.2: a non-empty project filter must never leak a project-less "global" fact through
+	for _, r := range res {
+		if r.Title == "global fact" {
+			t.Fatalf("strict project filter leaked a project-less fact: %+v", res)
+		}
+	}
+
+	// AC-2: type filter returns only that type — two other facts share type "decision"
+	// (bbrain fact, global fact), so this also asserts strict exclusion of non-matching types.
+	res, err = a.Browse("", "preference")
+	if err != nil {
+		t.Fatalf("Browse: %v", err)
+	}
+	if len(res) != 1 || res[0].Title != "vexforge fact" {
+		t.Fatalf("type filter: want only vexforge fact, got %+v", res)
+	}
+	for _, r := range res {
+		if r.Type != "preference" {
+			t.Fatalf("type filter leaked a non-matching type: %+v", res)
+		}
+	}
+
+	// AC-3: no filter → all facts
+	res, err = a.Browse("", "")
+	if err != nil {
+		t.Fatalf("Browse: %v", err)
+	}
+	if len(res) != 3 {
+		t.Fatalf("no filter: want all 3 facts, got %+v", res)
+	}
+
+	// AC-4: project filter with zero facts → empty list, not error
+	res, err = a.Browse("nonexistent", "")
+	if err != nil {
+		t.Fatalf("Browse with nonexistent project: %v", err)
+	}
+	if len(res) != 0 {
+		t.Fatalf("zero-match project filter: want empty, got %+v", res)
 	}
 }
 

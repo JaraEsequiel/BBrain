@@ -434,6 +434,61 @@ func TestPorterRegressionSet(t *testing.T) {
 	}
 }
 
+// BBRAIN-4 (Search scoping): AC-1 project filter, AC-2 type filter, AC-3 no
+// filter behaves identically to today, AC-4 zero-match filter returns empty,
+// not an error.
+func TestSearchFiltersByProjectAndType(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("f1", "shared term", "body", "decision", "bbrain"), "/x/f1.md"))
+	must(t, ix.IndexFact(sampleFact("f2", "shared term", "body", "preference", "vexforge"), "/x/f2.md"))
+
+	// AC-1 TC-1.1: project filter excludes other projects
+	res, err := ix.Search("shared", 10, "bbrain", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 || res[0].FactID != "f1" {
+		t.Fatalf("AC-1 TC-1.1 project filter: want only f1, got %+v", res)
+	}
+
+	// AC-2 TC-2.1: type filter excludes other types
+	res, err = ix.Search("shared", 10, "", "preference")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 || res[0].FactID != "f2" {
+		t.Fatalf("AC-2 TC-2.1 type filter: want only f2, got %+v", res)
+	}
+
+	// AC-1+AC-2 combined: both filters apply conjunctively (project AND type)
+	must(t, ix.IndexFact(sampleFact("f3", "shared term", "body", "decision", "vexforge"), "/x/f3.md"))
+	res, err = ix.Search("shared", 10, "vexforge", "preference")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 || res[0].FactID != "f2" {
+		t.Fatalf("combined project+type filter: want only f2 (vexforge+preference), got %+v", res)
+	}
+
+	// AC-3 TC-3.1: no filter → all three facts, identical to pre-change behavior
+	res, err = ix.Search("shared", 10, "", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 3 {
+		t.Fatalf("AC-3 TC-3.1 no filter: want all 3 facts, got %+v", res)
+	}
+
+	// AC-4 TC-4.1/TC-4.2: project filter with zero matches → empty, not error
+	res, err = ix.Search("shared", 10, "nonexistent", "")
+	if err != nil {
+		t.Fatalf("AC-4 TC-4.2 Search with nonexistent project: %v", err)
+	}
+	if len(res) != 0 {
+		t.Fatalf("AC-4 TC-4.1 zero-match project filter: want empty, got %+v", res)
+	}
+}
+
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

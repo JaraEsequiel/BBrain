@@ -8,6 +8,7 @@ import (
 
 	"github.com/JaraEsequiel/BBrain/internal/app"
 	"github.com/JaraEsequiel/BBrain/internal/index"
+	"github.com/JaraEsequiel/BBrain/internal/store"
 )
 
 func toolByName(t *testing.T, name string) Tool {
@@ -31,8 +32,9 @@ func call(t *testing.T, a *app.App, name, args string) string {
 	return string(b)
 }
 
+// BBRAIN-5: catalog must include mem_browse.
 func TestCatalogHasExpectedTools(t *testing.T) {
-	want := []string{"mem_save", "mem_search", "mem_get", "mem_delete", "mem_link", "mem_why", "mem_related", "mem_candidates", "mem_current_project", "wiki_build", "wiki_link", "wiki_lint"}
+	want := []string{"mem_save", "mem_search", "mem_get", "mem_delete", "mem_link", "mem_why", "mem_related", "mem_candidates", "mem_current_project", "mem_browse", "wiki_build", "wiki_link", "wiki_lint"}
 	have := map[string]bool{}
 	for _, tl := range DefaultTools() {
 		have[tl.Name] = true
@@ -44,6 +46,57 @@ func TestCatalogHasExpectedTools(t *testing.T) {
 		if !have[w] {
 			t.Fatalf("catalog missing tool %q", w)
 		}
+	}
+}
+
+// BBRAIN-4 AC-5: mem_search MCP schema passes project/type through to
+// ix.Search. TC-5.1 project param reaches the filter at the MCP boundary;
+// TC-5.2 omitting project/type behaves identically to pre-change (unfiltered).
+func TestMemSearchProjectFilter(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{Title: "alpha shared", Body: "b", Type: "decision", Project: "bbrain"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{Title: "beta shared", Body: "b", Type: "decision", Project: "vexforge"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// AC-5 TC-5.1: project param reaches ix.Search through the MCP boundary
+	out := call(t, a, "mem_search", `{"query":"shared","project":"bbrain"}`)
+	if !strings.Contains(out, "alpha shared") || strings.Contains(out, "beta shared") {
+		t.Fatalf("AC-5 TC-5.1 project filter not applied at MCP boundary: %s", out)
+	}
+
+	// AC-5 TC-5.2: omitting project/type behaves identically to pre-change (unfiltered)
+	out = call(t, a, "mem_search", `{"query":"shared"}`)
+	if !strings.Contains(out, "alpha shared") || !strings.Contains(out, "beta shared") {
+		t.Fatalf("AC-5 TC-5.2 unfiltered mem_search should return both facts: %s", out)
+	}
+}
+
+// BBRAIN-5 AC-1/AC-2: mem_browse filters by project at the MCP boundary and
+// never returns the full fact body (title+id+type projection only).
+func TestMemBrowseFiltersByProject(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{Title: "bbrain fact", Body: "b", Type: "decision", Project: "bbrain"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{Title: "vexforge fact", Body: "b", Type: "decision", Project: "vexforge"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	out := call(t, a, "mem_browse", `{"project":"bbrain"}`)
+	if !strings.Contains(out, "bbrain fact") || strings.Contains(out, "vexforge fact") {
+		t.Fatalf("project filter not applied at MCP boundary: %s", out)
+	}
+	if strings.Contains(out, `"body"`) {
+		t.Fatalf("mem_browse must not return full fact body: %s", out)
 	}
 }
 

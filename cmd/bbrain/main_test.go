@@ -56,6 +56,86 @@ func TestEndToEndSaveAndSearch(t *testing.T) {
 	}
 }
 
+// BBRAIN-4 AC-6: bbrain search CLI --project/--type flags reach ix.Search;
+// TC-6.1 filtered, TC-6.2 no flags → identical to pre-change unfiltered behavior.
+func TestEndToEndSearchProjectFilter(t *testing.T) {
+	t.Setenv("BBRAIN_HOME", t.TempDir())
+	var out, errOut bytes.Buffer
+
+	if code := run([]string{"save", "--title", "alpha shared", "--body", "b", "--type", "decision", "--project", "bbrain"}, &out, &errOut); code != 0 {
+		t.Fatalf("save bbrain fact: code=%d stderr=%s", code, errOut.String())
+	}
+	out.Reset()
+	if code := run([]string{"save", "--title", "beta shared", "--body", "b", "--type", "decision", "--project", "vexforge"}, &out, &errOut); code != 0 {
+		t.Fatalf("save vexforge fact: code=%d stderr=%s", code, errOut.String())
+	}
+	out.Reset()
+
+	if code := run([]string{"search", "shared", "--project", "bbrain"}, &out, &errOut); code != 0 {
+		t.Fatalf("search: code=%d stderr=%s", code, errOut.String())
+	}
+	// AC-6 TC-6.1
+	if !strings.Contains(out.String(), "alpha shared") {
+		t.Fatalf("AC-6 TC-6.1 expected bbrain fact in output, got: %s", out.String())
+	}
+	if strings.Contains(out.String(), "beta shared") {
+		t.Fatalf("AC-6 TC-6.1 project filter leaked vexforge fact: %s", out.String())
+	}
+
+	out.Reset()
+	// AC-6 combined: --project + --type together
+	if code := run([]string{"search", "shared", "--project", "bbrain", "--type", "decision"}, &out, &errOut); code != 0 {
+		t.Fatalf("search combined: code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "alpha shared") {
+		t.Fatalf("AC-6 combined filter: expected bbrain/decision fact, got: %s", out.String())
+	}
+
+	out.Reset()
+	// AC-6 TC-6.2: no flags → identical to pre-change (unfiltered) behavior
+	if code := run([]string{"search", "shared"}, &out, &errOut); code != 0 {
+		t.Fatalf("search unfiltered: code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "alpha shared") || !strings.Contains(out.String(), "beta shared") {
+		t.Fatalf("AC-6 TC-6.2 unfiltered search should show both facts, got: %s", out.String())
+	}
+}
+
+// BBRAIN-5 AC-3/AC-5: bbrain list CLI --project flag matches mem_browse
+// filtering semantics; no filter lists all facts (project+type, title only,
+// per App.Browse's shape).
+func TestEndToEndList(t *testing.T) {
+	t.Setenv("BBRAIN_HOME", t.TempDir())
+	var out, errOut bytes.Buffer
+
+	if code := run([]string{"save", "--title", "bbrain fact", "--body", "b", "--type", "decision", "--project", "bbrain"}, &out, &errOut); code != 0 {
+		t.Fatalf("save: code=%d stderr=%s", code, errOut.String())
+	}
+	out.Reset()
+	if code := run([]string{"save", "--title", "vexforge fact", "--body", "b", "--type", "decision", "--project", "vexforge"}, &out, &errOut); code != 0 {
+		t.Fatalf("save: code=%d stderr=%s", code, errOut.String())
+	}
+	out.Reset()
+
+	if code := run([]string{"list", "--project", "bbrain"}, &out, &errOut); code != 0 {
+		t.Fatalf("list: code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "bbrain fact") {
+		t.Fatalf("expected bbrain fact in output, got: %s", out.String())
+	}
+	if strings.Contains(out.String(), "vexforge fact") {
+		t.Fatalf("project filter leaked vexforge fact: %s", out.String())
+	}
+
+	out.Reset()
+	if code := run([]string{"list"}, &out, &errOut); code != 0 {
+		t.Fatalf("list (no filter): code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "bbrain fact") || !strings.Contains(out.String(), "vexforge fact") {
+		t.Fatalf("no-filter list should show both facts, got: %s", out.String())
+	}
+}
+
 func TestEndToEndLinkWhyRelated(t *testing.T) {
 	t.Setenv("BBRAIN_HOME", t.TempDir())
 	var out, errOut bytes.Buffer

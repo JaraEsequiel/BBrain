@@ -364,6 +364,76 @@ func TestSearchDoesNotOverstemDistinctWords(t *testing.T) {
 	}
 }
 
+func TestPorterRegressionSet(t *testing.T) {
+	type seedFact struct{ id, title, body string }
+	corpus := []seedFact{
+		{"f1", "Migrating a schema change on the FTS5 index", "no ALTER ADD COLUMN available, drop and rebuild instead"},
+		{"f2", "mem_search fallback to SearchAny when AND returns zero", "the OR-based fallback search path for broad queries"},
+		{"f3", "Archiving old sessions from the vault", "cleanup task, not a deletion"},
+		{"f4", "Reindexing the vault after a schema change", "bbrain rebuilds facts_fts from disk"},
+		{"f5", "Decisión de arquitectura: usar SQLite embebido", "decisiones tomadas durante el diseño del proyecto"},
+		{"f6", "Use JWT for authenticating requests", "tokens instead of server-side sessions"},
+		{"f7", "Choosing Postgres over other relational databases", "chosen over SQLite for the main app"},
+		{"f8", "Testing strategies for the index package", "table-driven tests for buildMatch helpers"},
+	}
+
+	buildOld := func(t *testing.T) *Index {
+		t.Helper()
+		path := t.TempDir() + "/index.db"
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatalf("sql.Open: %v", err)
+		}
+		if _, err := db.Exec(`CREATE VIRTUAL TABLE facts_fts USING fts5(fact_id UNINDEXED, path UNINDEXED, title, body, tags, topic_key, type UNINDEXED, scope UNINDEXED, project UNINDEXED, updated_at UNINDEXED, created_at UNINDEXED)`); err != nil {
+			t.Fatalf("create old schema: %v", err)
+		}
+		old := &Index{db: db}
+		for _, f := range corpus {
+			must(t, old.IndexFact(sampleFact(f.id, f.title, f.body, "note", "p"), "/x/"+f.id+".md"))
+		}
+		return old
+	}
+
+	old := buildOld(t)
+	defer old.Close()
+	newIx := openMem(t)
+	for _, f := range corpus {
+		must(t, newIx.IndexFact(sampleFact(f.id, f.title, f.body, "note", "p"), "/x/"+f.id+".md"))
+	}
+
+	cases := []struct {
+		term    string
+		english bool // false = Spanish, exempt from the "strictly higher" bar (D3)
+	}{
+		{"migrate", true},
+		{"reindex", true},
+		{"archive", true},
+		{"authentication", true},
+		{"database", true},
+		{"test", true},
+		{"decisiones", false},
+		{"decisión", false},
+	}
+
+	for _, c := range cases {
+		oldRes, err := old.Search(c.term, 10)
+		if err != nil {
+			t.Fatalf("old.Search(%q): %v", c.term, err)
+		}
+		newRes, err := newIx.Search(c.term, 10)
+		if err != nil {
+			t.Fatalf("newIx.Search(%q): %v", c.term, err)
+		}
+
+		if len(newRes) < len(oldRes) {
+			t.Errorf("%q: porter recall %d < old recall %d — regression (AC-2)", c.term, len(newRes), len(oldRes))
+		}
+		if c.english && len(oldRes) == 0 && len(newRes) == 0 {
+			t.Errorf("%q: expected porter to find a stemmed match for this English inflected term (AC-3), got 0 under both tokenizers", c.term)
+		}
+	}
+}
+
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

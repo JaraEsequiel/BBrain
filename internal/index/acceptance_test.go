@@ -99,11 +99,11 @@ func TestAcceptance_AC2_TC2_1_RegressionRecallNeverBelowOldTokenizer(t *testing.
 
 	terms := []string{"reindex", "archiving", "migrate", "testing", "authentication", "database"}
 	for _, term := range terms {
-		oldRes, err := old.Search(term, 10)
+		oldRes, err := old.Search(term, 10, "", "")
 		if err != nil {
 			t.Fatalf("old.Search(%q): %v", term, err)
 		}
-		newRes, err := newIx.Search(term, 10)
+		newRes, err := newIx.Search(term, 10, "", "")
 		if err != nil {
 			t.Fatalf("newIx.Search(%q): %v", term, err)
 		}
@@ -135,14 +135,14 @@ func TestAcceptance_AC3_TC3_1_EnglishInflectedRecallBecomesNonZero(t *testing.T)
 	// stems both forms to the same root.
 	cases := []string{"archiving", "migrate"}
 	for _, term := range cases {
-		oldRes, err := old.Search(term, 10)
+		oldRes, err := old.Search(term, 10, "", "")
 		if err != nil {
 			t.Fatalf("old.Search(%q): %v", term, err)
 		}
 		if len(oldRes) != 0 {
 			t.Fatalf("test setup invalid: old.Search(%q) = %d, want 0 (need a genuinely zero baseline for AC-3)", term, len(oldRes))
 		}
-		newRes, err := newIx.Search(term, 10)
+		newRes, err := newIx.Search(term, 10, "", "")
 		if err != nil {
 			t.Fatalf("newIx.Search(%q): %v", term, err)
 		}
@@ -168,11 +168,11 @@ func TestAcceptance_AC3_TC3_2_SpanishInflectedNotMiscountedAsRegressionOrPass(t 
 		must(t, newIx.IndexFact(sampleFact(s.id, s.title, s.body, "note", "p"), "/x/"+s.id+".md"))
 	}
 
-	oldRes, err := old.Search("decisiones", 10)
+	oldRes, err := old.Search("decisiones", 10, "", "")
 	if err != nil {
 		t.Fatalf("old.Search: %v", err)
 	}
-	newRes, err := newIx.Search("decisiones", 10)
+	newRes, err := newIx.Search("decisiones", 10, "", "")
 	if err != nil {
 		t.Fatalf("newIx.Search: %v", err)
 	}
@@ -190,10 +190,10 @@ func TestAcceptance_AC4_TC4_1_SearchAnyFallbackStillWorksUnderPorterIndex(t *tes
 	must(t, ix.IndexFact(sampleFact("f1", "Use JWT for auth", "stateless tokens", "decision", "p"), "/x/f1.md"))
 	must(t, ix.IndexFact(sampleFact("f2", "Postgres choice", "relational database", "decision", "p"), "/x/f2.md"))
 
-	if res, _ := ix.Search("jwt database", 10); len(res) != 0 {
+	if res, _ := ix.Search("jwt database", 10, "", ""); len(res) != 0 {
 		t.Fatalf("Search(AND) = %+v, want 0 (no single fact has both terms)", res)
 	}
-	res, err := ix.SearchAny("jwt database", 10)
+	res, err := ix.SearchAny("jwt database", 10, "", "")
 	if err != nil {
 		t.Fatalf("SearchAny: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestAcceptance_AC4_TC4_2_SearchAnyNoFalsePositivesOnNoMatch(t *testing.T) {
 	ix := openMem(t)
 	must(t, ix.IndexFact(sampleFact("f1", "Use JWT for auth", "stateless tokens", "decision", "p"), "/x/f1.md"))
 
-	res, err := ix.SearchAny("kubernetes wombat", 10)
+	res, err := ix.SearchAny("kubernetes wombat", 10, "", "")
 	if err != nil {
 		t.Fatalf("SearchAny: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestAcceptance_AC6_TC6_1_ExactTermMatchesStillHoldUnderPorter(t *testing.T)
 	must(t, ix.IndexFact(sampleFact("f1", "Use JWT for auth", "stateless tokens", "decision", "bbrain"), "/x/f1.md"))
 	must(t, ix.IndexFact(sampleFact("f2", "Postgres choice", "relational database", "decision", "bbrain"), "/x/f2.md"))
 
-	res, err := ix.Search("jwt", 10)
+	res, err := ix.Search("jwt", 10, "", "")
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestAcceptance_AC6_TC6_2_PorterDoesNotOverstemDistinctWords(t *testing.T) {
 	must(t, ix.IndexFact(sampleFact("f1", "Authentication roadmap", "JWT and session tokens", "note", "p"), "/x/f1.md"))
 	must(t, ix.IndexFact(sampleFact("f2", "Author guidelines document", "style and formatting notes", "note", "p"), "/x/f2.md"))
 
-	res, err := ix.Search("authentication", 10)
+	res, err := ix.Search("authentication", 10, "", "")
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}

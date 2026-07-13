@@ -27,7 +27,7 @@ func TestSearchFindsByTitleAndBody(t *testing.T) {
 	must(t, ix.IndexFact(sampleFact("f1", "Use JWT for auth", "stateless tokens", "decision", "bbrain"), "/x/f1.md"))
 	must(t, ix.IndexFact(sampleFact("f2", "Postgres choice", "relational database", "decision", "bbrain"), "/x/f2.md"))
 
-	res, err := ix.Search("jwt", 10)
+	res, err := ix.Search("jwt", 10, "", "")
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -44,10 +44,10 @@ func TestIndexFactIsUpsert(t *testing.T) {
 	must(t, ix.IndexFact(sampleFact("f1", "Old title", "old body", "decision", "bbrain"), "/x/f1.md"))
 	must(t, ix.IndexFact(sampleFact("f1", "New title carrot", "new body", "decision", "bbrain"), "/x/f1.md"))
 
-	if res, _ := ix.Search("carrot", 10); len(res) != 1 {
+	if res, _ := ix.Search("carrot", 10, "", ""); len(res) != 1 {
 		t.Fatalf("Search(carrot) = %+v, want 1 (new content)", res)
 	}
-	if res, _ := ix.Search("old", 10); len(res) != 0 {
+	if res, _ := ix.Search("old", 10, "", ""); len(res) != 0 {
 		t.Fatalf("Search(old) = %+v, want 0 (old content gone)", res)
 	}
 }
@@ -55,7 +55,7 @@ func TestIndexFactIsUpsert(t *testing.T) {
 func TestSearchQueryWithSpecialCharsDoesNotError(t *testing.T) {
 	ix := openMem(t)
 	must(t, ix.IndexFact(sampleFact("f1", "Auth (v2) AND tokens", "body", "decision", "bbrain"), "/x/f1.md"))
-	if _, err := ix.Search(`auth (v2) AND "tokens`, 10); err != nil {
+	if _, err := ix.Search(`auth (v2) AND "tokens`, 10, "", ""); err != nil {
 		t.Fatalf("Search with FTS5 special chars should not error: %v", err)
 	}
 }
@@ -65,7 +65,7 @@ func TestSearchNoMatchReturnsNonNilSlice(t *testing.T) {
 	// A zero-match search (and a blank query) must yield a non-nil empty slice so
 	// the MCP layer serializes "results": [] rather than null — null reads as error.
 	for _, q := range []string{"nothingmatchesthis", ""} {
-		got, err := ix.Search(q, 10)
+		got, err := ix.Search(q, 10, "", "")
 		if err != nil {
 			t.Fatalf("Search(%q): %v", q, err)
 		}
@@ -82,7 +82,7 @@ func TestResetEmptiesIndex(t *testing.T) {
 	ix := openMem(t)
 	must(t, ix.IndexFact(sampleFact("f1", "Use JWT", "body", "decision", "bbrain"), "/x/f1.md"))
 	must(t, ix.Reset())
-	if res, _ := ix.Search("jwt", 10); len(res) != 0 {
+	if res, _ := ix.Search("jwt", 10, "", ""); len(res) != 0 {
 		t.Fatalf("after Reset, Search = %+v, want empty", res)
 	}
 }
@@ -167,11 +167,11 @@ func TestSearchAnyMatchesAnyTerm(t *testing.T) {
 	must(t, ix.IndexFact(sampleFact("f2", "Postgres choice", "relational database", "decision", "p"), "/x/f2.md"))
 
 	// AND search (Search) for two terms in different facts matches nothing.
-	if res, _ := ix.Search("jwt database", 10); len(res) != 0 {
+	if res, _ := ix.Search("jwt database", 10, "", ""); len(res) != 0 {
 		t.Fatalf("Search(AND) = %+v, want 0", res)
 	}
 	// OR search (SearchAny) matches both.
-	res, err := ix.SearchAny("jwt database", 10)
+	res, err := ix.SearchAny("jwt database", 10, "", "")
 	if err != nil {
 		t.Fatalf("SearchAny: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestDeleteFactRemovesFromSearchAndLinks(t *testing.T) {
 	if err := ix.DeleteFact("f1"); err != nil {
 		t.Fatal(err)
 	}
-	res, _ := ix.Search("jwt", 10)
+	res, _ := ix.Search("jwt", 10, "", "")
 	if len(res) != 0 {
 		t.Fatalf("search still returns deleted fact: %v", res)
 	}
@@ -284,7 +284,7 @@ func TestSearchMatchesStemmedTerm(t *testing.T) {
 	ix := openMem(t)
 	must(t, ix.IndexFact(sampleFact("f1", "Archive old sessions", "cleanup task for the vault", "task", "p"), "/x/f1.md"))
 
-	res, err := ix.Search("archiving", 10)
+	res, err := ix.Search("archiving", 10, "", "")
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestSearchDoesNotOverstemDistinctWords(t *testing.T) {
 	must(t, ix.IndexFact(sampleFact("f1", "Use JWT for authentication", "stateless tokens", "note", "p"), "/x/f1.md"))
 	must(t, ix.IndexFact(sampleFact("f2", "Author guidelines for the changelog", "writing style notes", "note", "p"), "/x/f2.md"))
 
-	res, err := ix.Search("authentication", 10)
+	res, err := ix.Search("authentication", 10, "", "")
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -416,11 +416,11 @@ func TestPorterRegressionSet(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		oldRes, err := old.Search(c.term, 10)
+		oldRes, err := old.Search(c.term, 10, "", "")
 		if err != nil {
 			t.Fatalf("old.Search(%q): %v", c.term, err)
 		}
-		newRes, err := newIx.Search(c.term, 10)
+		newRes, err := newIx.Search(c.term, 10, "", "")
 		if err != nil {
 			t.Fatalf("newIx.Search(%q): %v", c.term, err)
 		}

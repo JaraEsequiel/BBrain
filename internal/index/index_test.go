@@ -350,6 +350,20 @@ func TestOpenIgnoresFreshEmptyIndex(t *testing.T) {
 	}
 }
 
+func TestSearchDoesNotOverstemDistinctWords(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("f1", "Use JWT for authentication", "stateless tokens", "note", "p"), "/x/f1.md"))
+	must(t, ix.IndexFact(sampleFact("f2", "Author guidelines for the changelog", "writing style notes", "note", "p"), "/x/f2.md"))
+
+	res, err := ix.Search("authentication", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 || res[0].Title != "Use JWT for authentication" {
+		t.Fatalf("Search(authentication) = %+v, want only the authentication fact — porter must not conflate authentication/author", res)
+	}
+}
+
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

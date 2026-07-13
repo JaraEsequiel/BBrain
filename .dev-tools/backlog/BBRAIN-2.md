@@ -2,13 +2,14 @@
 key: BBRAIN-2
 type: Story
 title: "Search: Enable porter stemming with regression tests"
-status: todo
+status: in-review
 parent: BBRAIN-1
 area: search
 labels: [index, fts5, search]
 points: 5
+pr: https://github.com/JaraEsequiel/BBrain/pull/30
 created: 2026-07-13T19:14:50Z
-updated: 2026-07-13T19:14:50Z
+updated: 2026-07-13T21:04:30Z
 reviewed_by: ticket-reviewer (autonomous), 2026-07-13
 ---
 

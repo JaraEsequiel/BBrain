@@ -279,6 +279,19 @@ func TestResetRecreatesSchema(t *testing.T) {
 	}
 }
 
+func TestSearchMatchesStemmedTerm(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("f1", "Archive old sessions", "cleanup task for the vault", "task", "p"), "/x/f1.md"))
+
+	res, err := ix.Search("archiving", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("Search(archiving) = %+v, want 1 match via porter stemming of \"archive\"", res)
+	}
+}
+
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

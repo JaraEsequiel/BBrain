@@ -32,7 +32,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
 	scope UNINDEXED,
 	project UNINDEXED,
 	updated_at UNINDEXED,
-	created_at UNINDEXED
+	created_at UNINDEXED,
+	tokenize = 'porter unicode61'
 );`
 
 // linksSchema is a plain (non-FTS) table mirroring each fact's reasoned wikilinks.

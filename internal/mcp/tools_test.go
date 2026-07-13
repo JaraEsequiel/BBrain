@@ -187,6 +187,27 @@ func TestMemSearchResultUsesSnakeCase(t *testing.T) {
 	}
 }
 
+func TestMemSearchOmitsStaleKeyWhenIndexCurrent(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	call(t, a, "mem_save", `{"type":"note","title":"Fresh fact","body":"current schema","project":"p","scope":"project"}`)
+
+	raw, _ := json.Marshal(map[string]any{"query": "fresh", "limit": 10})
+	out, err := handleMemSearch(context.Background(), a, raw)
+	if err != nil {
+		t.Fatalf("handleMemSearch: %v", err)
+	}
+	m, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("handleMemSearch returned %T, want map[string]any", out)
+	}
+	if _, present := m["stale"]; present {
+		t.Fatalf("response = %+v, want no \"stale\" key against a current index", m)
+	}
+}
+
 func TestMemSaveTopicKeyUpsert(t *testing.T) {
 	a := app.New(t.TempDir())
 	if err := a.Init(); err != nil {

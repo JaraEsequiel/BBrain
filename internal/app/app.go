@@ -105,24 +105,26 @@ func (a *App) Save(in store.SaveInput) (fact.Fact, error) {
 // finds nothing — so a broad multi-keyword query like "Juan Jara role company"
 // still surfaces partially-overlapping facts instead of returning empty. BM25
 // keeps the best-covering facts on top. Single-term queries are unaffected (AND
-// and OR are identical there).
-func (a *App) Search(query string, limit int) ([]index.Result, error) {
+// and OR are identical there). stale is true when the on-disk index predates
+// this ticket's tokenizer/schema change and hasn't been reindexed yet.
+func (a *App) Search(query string, limit int) (results []index.Result, stale bool, err error) {
 	if err := a.ensureIndexDir(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	ix, err := index.Open(a.Brain.IndexPath())
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer ix.Close()
 	res, err := ix.Search(query, limit)
 	if err != nil {
-		return nil, err
+		return nil, ix.Stale(), err
 	}
 	if len(res) == 0 {
-		return ix.SearchAny(query, limit)
+		res, err = ix.SearchAny(query, limit)
+		return res, ix.Stale(), err
 	}
-	return res, nil
+	return res, ix.Stale(), nil
 }
 
 // Link adds (or updates) a reasoned wikilink from srcID to dstID on the source

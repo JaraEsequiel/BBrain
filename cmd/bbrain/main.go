@@ -156,10 +156,13 @@ func cmdSearch(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	a := app.New(brainRoot())
-	res, err := a.Search(query, *limit)
+	res, stale, err := a.Search(query, *limit)
 	if err != nil {
 		fmt.Fprintf(stderr, "search: %v\n", err)
 		return 1
+	}
+	if stale {
+		fmt.Fprintln(stderr, "warning: search index predates a schema change and hasn't been reindexed (run `bbrain reindex`) — results may be incomplete")
 	}
 	for _, r := range res {
 		fmt.Fprintf(stdout, "%s\t%s\t%s\n", r.FactID, r.Type, r.Title)

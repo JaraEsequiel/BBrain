@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/JaraEsequiel/BBrain/internal/index"
 	"github.com/JaraEsequiel/BBrain/internal/store"
 	"github.com/JaraEsequiel/BBrain/internal/wiki"
+	_ "modernc.org/sqlite"
 )
 
 func TestSaveThenSearch(t *testing.T) {
@@ -27,7 +29,7 @@ func TestSaveThenSearch(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	res, err := a.Search("jwt", 10)
+	res, _, err := a.Search("jwt", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -51,7 +53,7 @@ func TestSearchFallsBackToOrWhenAndFindsNothing(t *testing.T) {
 	// No fact contains all of these terms, so strict AND yields nothing. The OR
 	// fallback must still surface the partially-overlapping "Juan Jara" fact —
 	// this is the broad-query miss that returned {"results": null} before.
-	res, err := a.Search("Juan Jara role company team preferences", 10)
+	res, _, err := a.Search("Juan Jara role company team preferences", 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -80,7 +82,7 @@ func TestReindexRebuildsFromDisk(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("Reindex count = %d, want 1", n)
 	}
-	res, _ := a2.Search("postgres", 10)
+	res, _, _ := a2.Search("postgres", 10)
 	if len(res) != 1 {
 		t.Fatalf("Search after reindex = %+v, want 1", res)
 	}
@@ -88,7 +90,7 @@ func TestReindexRebuildsFromDisk(t *testing.T) {
 
 func TestSearchOnUninitializedBrainReturnsNoResults(t *testing.T) {
 	a := New(t.TempDir()) // note: no Init() — .bbrain/ does not exist
-	res, err := a.Search("anything", 10)
+	res, _, err := a.Search("anything", 10)
 	if err != nil {
 		t.Fatalf("Search on uninitialized brain should not error, got: %v", err)
 	}
@@ -487,7 +489,7 @@ func TestAppGetAndDelete(t *testing.T) {
 		t.Fatal("Get still finds the fact after Delete")
 	}
 	// Index reflects the delete too.
-	res, err := a.Search("jwt", 10)
+	res, _, err := a.Search("jwt", 10)
 	must(t, err)
 	if len(res) != 0 {
 		t.Fatalf("search returns deleted fact: %v", res)
@@ -572,7 +574,7 @@ func TestVaultMoveRelocatesAndReindexes(t *testing.T) {
 	if !ok || got.Title != "Movable JWT" {
 		t.Fatalf("fact missing at dest: %+v ok=%v", got, ok)
 	}
-	res, err := nb.Search("jwt", 10)
+	res, _, err := nb.Search("jwt", 10)
 	must(t, err)
 	if len(res) == 0 {
 		t.Fatal("search returns nothing after move (index not rebuilt)")
@@ -773,7 +775,7 @@ func TestArchiveRemovesFromSearchAndGetArchivedFinds(t *testing.T) {
 	f, err := a.Save(store.SaveInput{Type: "decision", Title: "Zeta quokka tokens", Body: "quokka body",
 		Project: "p", Scope: "project"})
 	must(t, err)
-	res, err := a.Search("quokka", 10)
+	res, _, err := a.Search("quokka", 10)
 	must(t, err)
 	if len(res) != 1 {
 		t.Fatalf("pre-archive search = %+v, want 1 hit", res)
@@ -785,7 +787,7 @@ func TestArchiveRemovesFromSearchAndGetArchivedFinds(t *testing.T) {
 		t.Fatalf("Archive returned %+v", got)
 	}
 	// Q1/criterio 1: exact terms of the fact yield 0 hits post-archive.
-	res, err = a.Search("quokka", 10)
+	res, _, err = a.Search("quokka", 10)
 	must(t, err)
 	if len(res) != 0 {
 		t.Fatalf("post-archive search = %+v, want 0 hits", res)
@@ -816,7 +818,7 @@ func TestUnarchiveRestoresSearchAndEdges(t *testing.T) {
 	if _, err := a.Archive(f1.ID); err != nil {
 		t.Fatal(err)
 	}
-	if res, _ := a.Search("wombat", 10); len(res) != 0 {
+	if res, _, _ := a.Search("wombat", 10); len(res) != 0 {
 		t.Fatalf("archived fact still in search: %+v", res)
 	}
 
@@ -826,7 +828,7 @@ func TestUnarchiveRestoresSearchAndEdges(t *testing.T) {
 		t.Fatalf("Unarchive returned %+v", got)
 	}
 	// Criterio: back in search AND edges re-indexed (IndexFact + IndexLinks).
-	res, err := a.Search("wombat", 10)
+	res, _, err := a.Search("wombat", 10)
 	must(t, err)
 	if len(res) != 1 || res[0].FactID != f1.ID {
 		t.Fatalf("post-unarchive search = %+v", res)
@@ -1021,5 +1023,44 @@ func TestPlanArchiveExplicitIDsUnionAndSkips(t *testing.T) {
 	}
 	if c, ok := candidateByID(cands, "2020-01-01-no-such-fact"); !ok || c.Skipped != "not found" {
 		t.Fatalf("unknown id must come back skipped=not found: %+v", cands)
+	}
+}
+
+func TestSearchFlagsStaleIndex(t *testing.T) {
+	a := New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{
+		Type: "note", Title: "Archive old sessions", Body: "cleanup",
+		Project: "bbrain", Scope: "project",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Force the on-disk index back to a pre-porter schema (no tokenizer clause,
+	// user_version left at 0) to simulate an un-reindexed index from before this change.
+	db, err := sql.Open("sqlite", a.Brain.IndexPath())
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	for _, stmt := range []string{
+		`DROP TABLE facts_fts`,
+		`CREATE VIRTUAL TABLE facts_fts USING fts5(fact_id UNINDEXED, path UNINDEXED, title, body, tags, topic_key, type UNINDEXED, scope UNINDEXED, project UNINDEXED, updated_at UNINDEXED, created_at UNINDEXED)`,
+		`PRAGMA user_version = 0`,
+		`INSERT INTO facts_fts(fact_id, path, title, body, tags, topic_key, type, scope, project, updated_at, created_at) VALUES ('f1', '/x/f1.md', 'Archive old sessions', 'cleanup', '', '', 'note', 'project', 'bbrain', '', '')`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("exec %q: %v", stmt, err)
+		}
+	}
+	db.Close()
+
+	_, stale, err := a.Search("archive", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if !stale {
+		t.Fatalf("Search() stale = false, want true against a pre-porter on-disk index")
 	}
 }

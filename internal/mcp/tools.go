@@ -19,6 +19,7 @@ func DefaultTools() []Tool {
 		{Name: "mem_search", Description: "Full-text search memories.", InputSchema: schemaMemSearch, Handler: handleMemSearch},
 		{Name: "mem_get", Description: "Fetch one memory by id.", InputSchema: schemaID, Handler: handleMemGet},
 		{Name: "mem_delete", Description: "Delete a memory by id.", InputSchema: schemaID, Handler: handleMemDelete},
+		{Name: "mem_archive", Description: "Archive facts by explicit id (batch). Only in response to explicit user intent (\"archive that\", \"remove that from search\") — never autonomous housekeeping, never bulk-by-filter.", InputSchema: schemaIDs, Handler: handleMemArchive},
 		{Name: "mem_link", Description: "Add a reasoned typed link between two memories.", InputSchema: schemaMemLink, Handler: handleMemLink},
 		{Name: "mem_why", Description: "Explain how two memories are directly related.", InputSchema: schemaMemWhy, Handler: handleMemWhy},
 		{Name: "mem_related", Description: "List memories linked to/from a memory.", InputSchema: schemaID, Handler: handleMemRelated},
@@ -36,6 +37,7 @@ func DefaultTools() []Tool {
 var (
 	schemaEmpty         = json.RawMessage(`{"type":"object"}`)
 	schemaID            = json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`)
+	schemaIDs           = json.RawMessage(`{"properties":{"ids":{"items":{}}},"required":["ids"]}`)
 	schemaMemSave       = json.RawMessage(`{"type":"object","properties":{"type":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},"project":{"type":"string"},"scope":{"type":"string"},"topic_key":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"pinned":{"type":"boolean"}},"required":["type","title","body"]}`)
 	schemaMemSearch     = json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"},"project":{"type":"string"},"type":{"type":"string"}},"required":["query"]}`)
 	schemaMemLink       = json.RawMessage(`{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"relation":{"type":"string"},"why":{"type":"string"}},"required":["from","to","relation","why"]}`)
@@ -176,6 +178,23 @@ func handleMemDelete(ctx context.Context, a *app.App, raw json.RawMessage) (any,
 		return nil, err
 	}
 	return map[string]any{"deleted": deleted}, nil
+}
+
+func handleMemArchive(ctx context.Context, a *app.App, raw json.RawMessage) (any, error) {
+	var in struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return nil, err
+	}
+	archived := make([]string, 0, len(in.IDs))
+	for _, id := range in.IDs {
+		if _, err := a.Archive(id); err != nil {
+			continue
+		}
+		archived = append(archived, id)
+	}
+	return map[string]any{"ids": archived, "count": len(archived)}, nil
 }
 
 func handleMemLink(ctx context.Context, a *app.App, raw json.RawMessage) (any, error) {

@@ -37,4 +37,4 @@ Same evidence as BBRAIN-4 — all 14 packages green, vet clean, both before and 
 Accepted — branch-gate-reviewer (autonomous), 2026-07-14. Same classification run as BBRAIN-4 (shared branch).
 
 ## PR
-Pending Step 7.
+https://github.com/JaraEsequiel/BBrain/pull/32

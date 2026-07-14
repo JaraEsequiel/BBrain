@@ -141,7 +141,12 @@ func cmdSearch(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	limit := fs.Int("limit", 20, "max results")
-	if err := fs.Parse(args); err != nil {
+	project := fs.String("project", "", "filter by project (optional)")
+	typ := fs.String("type", "", "filter by fact type (optional)")
+	// query is positional but --project/--type may follow it; flag.Parse only
+	// recognizes flags preceding the first positional arg, so move known
+	// flags ahead of the query terms first.
+	if err := fs.Parse(reorderFlagsFirst(args, "limit", "project", "type")); err != nil {
 		return 2
 	}
 	query := ""
@@ -156,7 +161,7 @@ func cmdSearch(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	a := app.New(brainRoot())
-	res, stale, err := a.Search(query, *limit)
+	res, stale, err := a.Search(query, *limit, *project, *typ)
 	if err != nil {
 		fmt.Fprintf(stderr, "search: %v\n", err)
 		return 1
@@ -168,6 +173,33 @@ func cmdSearch(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s\t%s\t%s\n", r.FactID, r.Type, r.Title)
 	}
 	return 0
+}
+
+// reorderFlagsFirst moves each recognized --name/--name=value token (and, for
+// the space-separated form, its following value) ahead of the remaining
+// positional args, so flag.Parse — which stops at the first non-flag arg —
+// still recognizes flags typed after the positional query.
+func reorderFlagsFirst(args []string, names ...string) []string {
+	known := make(map[string]bool, len(names))
+	for _, n := range names {
+		known[n] = true
+	}
+	flags := make([]string, 0, len(args))
+	positional := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		name, _, hasEq := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		if !strings.HasPrefix(a, "-") || !known[name] {
+			positional = append(positional, a)
+			continue
+		}
+		flags = append(flags, a)
+		if !hasEq && i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+	return append(flags, positional...)
 }
 
 func cmdLink(args []string, stdout, stderr io.Writer) int {

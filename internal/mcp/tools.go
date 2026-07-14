@@ -120,7 +120,7 @@ func handleMemSearch(ctx context.Context, a *app.App, raw json.RawMessage) (any,
 	if in.Limit <= 0 {
 		in.Limit = 10
 	}
-	res, stale, err := a.Search(in.Query, in.Limit)
+	res, stale, err := a.Search(in.Query, in.Limit, "", "") // ponytail: arity fix only, Task 4 wires project/type into mem_search
 	if err != nil {
 		return nil, err
 	}

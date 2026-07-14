@@ -201,6 +201,10 @@ func cmdList(args []string, stdout, stderr io.Writer) int {
 // the space-separated form, its following value) ahead of the remaining
 // positional args, so flag.Parse — which stops at the first non-flag arg —
 // still recognizes flags typed after the positional query.
+//
+// If a space-separated flag is followed by another flag (starts with "-"),
+// an empty string is appended as its value to prevent flag.Parse from
+// treating the next flag as a value.
 func reorderFlagsFirst(args []string, names ...string) []string {
 	known := make(map[string]bool, len(names))
 	for _, n := range names {
@@ -217,8 +221,15 @@ func reorderFlagsFirst(args []string, names ...string) []string {
 		}
 		flags = append(flags, a)
 		if !hasEq && i+1 < len(args) {
-			i++
-			flags = append(flags, args[i])
+			if strings.HasPrefix(args[i+1], "-") {
+				// Next arg is another flag, so append empty string to prevent
+				// flag.Parse from consuming the next flag as this flag's value
+				flags = append(flags, "")
+			} else {
+				// Next arg is not a flag, so consume it as this flag's value
+				i++
+				flags = append(flags, args[i])
+			}
 		}
 	}
 	return append(flags, positional...)

@@ -277,7 +277,7 @@ type Result struct {
 }
 
 // Search runs an FTS5 MATCH over title/body/tags/topic_key (all query terms
-// AND-ed), ranked by BM25. project/typ, when non-empty, restrict results to an
+// AND-ed), ranked by BM25. project/type, when non-empty, restrict results to an
 // exact match on those columns (both empty preserves the unfiltered behavior).
 func (ix *Index) Search(query string, limit int, project, typ string) ([]Result, error) {
 	return ix.search(buildMatch(query), limit, project, typ)

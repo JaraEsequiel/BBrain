@@ -205,7 +205,7 @@ func (a *App) Candidates(id string, limit int) ([]index.Result, error) {
 	defer ix.Close()
 	// Over-fetch so that, after dropping self + already-linked, we can still return
 	// up to limit results.
-	res, err := ix.SearchAny(terms, limit+len(linked), "", "") // ponytail: Candidates unscoped (D4) — no public filter param, no AC/caller needs it
+	res, err := ix.SearchAny(terms, limit+len(linked), "", "") // ponytail: Candidates stays project/type-unscoped by design — mem_save's duplicate-hint and wiki_link's candidate discovery never asked for filtering, so no public param is exposed here; add one the moment a real caller needs it
 	if err != nil {
 		return nil, err
 	}

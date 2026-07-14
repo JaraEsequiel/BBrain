@@ -27,7 +27,7 @@ func TestSearchFindsByTitleAndBody(t *testing.T) {
 	must(t, ix.IndexFact(sampleFact("f1", "Use JWT for auth", "stateless tokens", "decision", "bbrain"), "/x/f1.md"))
 	must(t, ix.IndexFact(sampleFact("f2", "Postgres choice", "relational database", "decision", "bbrain"), "/x/f2.md"))
 
-	res, err := ix.Search("jwt", 10)
+	res, err := ix.Search("jwt", 10, "", "")
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -44,10 +44,10 @@ func TestIndexFactIsUpsert(t *testing.T) {
 	must(t, ix.IndexFact(sampleFact("f1", "Old title", "old body", "decision", "bbrain"), "/x/f1.md"))
 	must(t, ix.IndexFact(sampleFact("f1", "New title carrot", "new body", "decision", "bbrain"), "/x/f1.md"))
 
-	if res, _ := ix.Search("carrot", 10); len(res) != 1 {
+	if res, _ := ix.Search("carrot", 10, "", ""); len(res) != 1 {
 		t.Fatalf("Search(carrot) = %+v, want 1 (new content)", res)
 	}
-	if res, _ := ix.Search("old", 10); len(res) != 0 {
+	if res, _ := ix.Search("old", 10, "", ""); len(res) != 0 {
 		t.Fatalf("Search(old) = %+v, want 0 (old content gone)", res)
 	}
 }
@@ -55,7 +55,7 @@ func TestIndexFactIsUpsert(t *testing.T) {
 func TestSearchQueryWithSpecialCharsDoesNotError(t *testing.T) {
 	ix := openMem(t)
 	must(t, ix.IndexFact(sampleFact("f1", "Auth (v2) AND tokens", "body", "decision", "bbrain"), "/x/f1.md"))
-	if _, err := ix.Search(`auth (v2) AND "tokens`, 10); err != nil {
+	if _, err := ix.Search(`auth (v2) AND "tokens`, 10, "", ""); err != nil {
 		t.Fatalf("Search with FTS5 special chars should not error: %v", err)
 	}
 }
@@ -65,7 +65,7 @@ func TestSearchNoMatchReturnsNonNilSlice(t *testing.T) {
 	// A zero-match search (and a blank query) must yield a non-nil empty slice so
 	// the MCP layer serializes "results": [] rather than null — null reads as error.
 	for _, q := range []string{"nothingmatchesthis", ""} {
-		got, err := ix.Search(q, 10)
+		got, err := ix.Search(q, 10, "", "")
 		if err != nil {
 			t.Fatalf("Search(%q): %v", q, err)
 		}
@@ -82,7 +82,7 @@ func TestResetEmptiesIndex(t *testing.T) {
 	ix := openMem(t)
 	must(t, ix.IndexFact(sampleFact("f1", "Use JWT", "body", "decision", "bbrain"), "/x/f1.md"))
 	must(t, ix.Reset())
-	if res, _ := ix.Search("jwt", 10); len(res) != 0 {
+	if res, _ := ix.Search("jwt", 10, "", ""); len(res) != 0 {
 		t.Fatalf("after Reset, Search = %+v, want empty", res)
 	}
 }
@@ -167,11 +167,11 @@ func TestSearchAnyMatchesAnyTerm(t *testing.T) {
 	must(t, ix.IndexFact(sampleFact("f2", "Postgres choice", "relational database", "decision", "p"), "/x/f2.md"))
 
 	// AND search (Search) for two terms in different facts matches nothing.
-	if res, _ := ix.Search("jwt database", 10); len(res) != 0 {
+	if res, _ := ix.Search("jwt database", 10, "", ""); len(res) != 0 {
 		t.Fatalf("Search(AND) = %+v, want 0", res)
 	}
 	// OR search (SearchAny) matches both.
-	res, err := ix.SearchAny("jwt database", 10)
+	res, err := ix.SearchAny("jwt database", 10, "", "")
 	if err != nil {
 		t.Fatalf("SearchAny: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestDeleteFactRemovesFromSearchAndLinks(t *testing.T) {
 	if err := ix.DeleteFact("f1"); err != nil {
 		t.Fatal(err)
 	}
-	res, _ := ix.Search("jwt", 10)
+	res, _ := ix.Search("jwt", 10, "", "")
 	if len(res) != 0 {
 		t.Fatalf("search still returns deleted fact: %v", res)
 	}
@@ -284,7 +284,7 @@ func TestSearchMatchesStemmedTerm(t *testing.T) {
 	ix := openMem(t)
 	must(t, ix.IndexFact(sampleFact("f1", "Archive old sessions", "cleanup task for the vault", "task", "p"), "/x/f1.md"))
 
-	res, err := ix.Search("archiving", 10)
+	res, err := ix.Search("archiving", 10, "", "")
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestSearchDoesNotOverstemDistinctWords(t *testing.T) {
 	must(t, ix.IndexFact(sampleFact("f1", "Use JWT for authentication", "stateless tokens", "note", "p"), "/x/f1.md"))
 	must(t, ix.IndexFact(sampleFact("f2", "Author guidelines for the changelog", "writing style notes", "note", "p"), "/x/f2.md"))
 
-	res, err := ix.Search("authentication", 10)
+	res, err := ix.Search("authentication", 10, "", "")
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -416,11 +416,11 @@ func TestPorterRegressionSet(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		oldRes, err := old.Search(c.term, 10)
+		oldRes, err := old.Search(c.term, 10, "", "")
 		if err != nil {
 			t.Fatalf("old.Search(%q): %v", c.term, err)
 		}
-		newRes, err := newIx.Search(c.term, 10)
+		newRes, err := newIx.Search(c.term, 10, "", "")
 		if err != nil {
 			t.Fatalf("newIx.Search(%q): %v", c.term, err)
 		}
@@ -431,6 +431,61 @@ func TestPorterRegressionSet(t *testing.T) {
 		if c.english && len(oldRes) == 0 && len(newRes) == 0 {
 			t.Errorf("%q: expected porter to find a stemmed match for this English inflected term (AC-3), got 0 under both tokenizers", c.term)
 		}
+	}
+}
+
+// BBRAIN-4 (Search scoping): AC-1 project filter, AC-2 type filter, AC-3 no
+// filter behaves identically to today, AC-4 zero-match filter returns empty,
+// not an error.
+func TestSearchFiltersByProjectAndType(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("f1", "shared term", "body", "decision", "bbrain"), "/x/f1.md"))
+	must(t, ix.IndexFact(sampleFact("f2", "shared term", "body", "preference", "vexforge"), "/x/f2.md"))
+
+	// AC-1 TC-1.1: project filter excludes other projects
+	res, err := ix.Search("shared", 10, "bbrain", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 || res[0].FactID != "f1" {
+		t.Fatalf("AC-1 TC-1.1 project filter: want only f1, got %+v", res)
+	}
+
+	// AC-2 TC-2.1: type filter excludes other types
+	res, err = ix.Search("shared", 10, "", "preference")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 || res[0].FactID != "f2" {
+		t.Fatalf("AC-2 TC-2.1 type filter: want only f2, got %+v", res)
+	}
+
+	// AC-1+AC-2 combined: both filters apply conjunctively (project AND type)
+	must(t, ix.IndexFact(sampleFact("f3", "shared term", "body", "decision", "vexforge"), "/x/f3.md"))
+	res, err = ix.Search("shared", 10, "vexforge", "preference")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 || res[0].FactID != "f2" {
+		t.Fatalf("combined project+type filter: want only f2 (vexforge+preference), got %+v", res)
+	}
+
+	// AC-3 TC-3.1: no filter → all three facts, identical to pre-change behavior
+	res, err = ix.Search("shared", 10, "", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 3 {
+		t.Fatalf("AC-3 TC-3.1 no filter: want all 3 facts, got %+v", res)
+	}
+
+	// AC-4 TC-4.1/TC-4.2: project filter with zero matches → empty, not error
+	res, err = ix.Search("shared", 10, "nonexistent", "")
+	if err != nil {
+		t.Fatalf("AC-4 TC-4.2 Search with nonexistent project: %v", err)
+	}
+	if len(res) != 0 {
+		t.Fatalf("AC-4 TC-4.1 zero-match project filter: want empty, got %+v", res)
 	}
 }
 

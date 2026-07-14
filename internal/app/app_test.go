@@ -29,7 +29,7 @@ func TestSaveThenSearch(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	res, _, err := a.Search("jwt", 10)
+	res, _, err := a.Search("jwt", 10, "", "")
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -53,12 +53,38 @@ func TestSearchFallsBackToOrWhenAndFindsNothing(t *testing.T) {
 	// No fact contains all of these terms, so strict AND yields nothing. The OR
 	// fallback must still surface the partially-overlapping "Juan Jara" fact —
 	// this is the broad-query miss that returned {"results": null} before.
-	res, _, err := a.Search("Juan Jara role company team preferences", 10)
+	res, _, err := a.Search("Juan Jara role company team preferences", 10, "", "")
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
 	if len(res) != 1 || res[0].Title != "Juan Jara" {
 		t.Fatalf("OR fallback Search = %+v; want the Juan Jara fact", res)
+	}
+}
+
+// BBRAIN-4 AC-1 (fallback leg): a query matching neither fact's full AND-term
+// set forces the OR fallback; the project filter must still exclude
+// "vexforge" on that leg (design D3).
+func TestSearchFallsBackToOrRespectsProjectFilter(t *testing.T) {
+	a := New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{Title: "alpha beta", Body: "body", Type: "decision", Project: "bbrain"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{Title: "gamma delta", Body: "body", Type: "decision", Project: "vexforge"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	res, _, err := a.Search("alpha gamma", 10, "bbrain", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	for _, r := range res {
+		if r.Project != "bbrain" {
+			t.Fatalf("AC-1 fallback leaked unfiltered result: %+v", r)
+		}
 	}
 }
 
@@ -82,7 +108,7 @@ func TestReindexRebuildsFromDisk(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("Reindex count = %d, want 1", n)
 	}
-	res, _, _ := a2.Search("postgres", 10)
+	res, _, _ := a2.Search("postgres", 10, "", "")
 	if len(res) != 1 {
 		t.Fatalf("Search after reindex = %+v, want 1", res)
 	}
@@ -90,7 +116,7 @@ func TestReindexRebuildsFromDisk(t *testing.T) {
 
 func TestSearchOnUninitializedBrainReturnsNoResults(t *testing.T) {
 	a := New(t.TempDir()) // note: no Init() — .bbrain/ does not exist
-	res, _, err := a.Search("anything", 10)
+	res, _, err := a.Search("anything", 10, "", "")
 	if err != nil {
 		t.Fatalf("Search on uninitialized brain should not error, got: %v", err)
 	}
@@ -202,6 +228,91 @@ func TestCandidatesExcludesSelfAndLinked(t *testing.T) {
 	must(t, err)
 	if containsID(cands2, f2.ID) {
 		t.Fatalf("candidates must exclude an already-linked fact: %+v", cands2)
+	}
+}
+
+// BBRAIN-5 (Search browse): AC-1 project filter (title+id+type shape, no
+// body), AC-2 type filter, AC-3 no filter returns all facts, AC-4 zero-match
+// filter returns empty not an error, AC-6 empty-string project never leaks a
+// project-less "global" fact through.
+func TestBrowseFiltersByProjectStrictly(t *testing.T) {
+	a := New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{Title: "bbrain fact", Body: "b", Type: "decision", Project: "bbrain"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{Title: "vexforge fact", Body: "b", Type: "preference", Project: "vexforge"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{Title: "global fact", Body: "b", Type: "decision", Project: ""}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// AC-1 TC-1.1: project filter returns only that project's facts, no full body in the shape
+	res, err := a.Browse("bbrain", "")
+	if err != nil {
+		t.Fatalf("Browse: %v", err)
+	}
+	if len(res) != 1 || res[0].Title != "bbrain fact" {
+		t.Fatalf("AC-1 TC-1.1 project filter: want only bbrain fact, got %+v", res)
+	}
+	// AC-1 TC-1.2: a fact belonging to another project never appears in the result set
+	for _, r := range res {
+		if r.Title == "vexforge fact" {
+			t.Fatalf("AC-1 TC-1.2 project filter leaked vexforge fact: %+v", res)
+		}
+	}
+
+	// AC-6 TC-6.2: a non-empty project filter must never leak a project-less "global" fact through
+	for _, r := range res {
+		if r.Title == "global fact" {
+			t.Fatalf("AC-6 TC-6.2 strict project filter leaked a project-less fact: %+v", res)
+		}
+	}
+
+	// AC-2 TC-2.1: type filter returns only that type — two other facts share type "decision"
+	// (bbrain fact, global fact), so this also asserts strict exclusion of non-matching types.
+	res, err = a.Browse("", "preference")
+	if err != nil {
+		t.Fatalf("Browse: %v", err)
+	}
+	if len(res) != 1 || res[0].Title != "vexforge fact" {
+		t.Fatalf("AC-2 TC-2.1 type filter: want only vexforge fact, got %+v", res)
+	}
+	// AC-2 TC-2.2: a non-matching-type fact never appears in the result set
+	for _, r := range res {
+		if r.Type != "preference" {
+			t.Fatalf("AC-2 TC-2.2 type filter leaked a non-matching type: %+v", res)
+		}
+	}
+
+	// AC-3 TC-3.1 / AC-6 TC-6.1: no filter (both empty, Go zero-values) → all facts,
+	// same as store.ListFacts() today
+	res, err = a.Browse("", "")
+	if err != nil {
+		t.Fatalf("Browse: %v", err)
+	}
+	if len(res) != 3 {
+		t.Fatalf("AC-3 TC-3.1 no filter: want all 3 facts, got %+v", res)
+	}
+	// AC-3 TC-3.2: confirms no facts are silently dropped when both filters are empty
+	seen := map[string]bool{}
+	for _, r := range res {
+		seen[r.Title] = true
+	}
+	if !seen["bbrain fact"] || !seen["vexforge fact"] || !seen["global fact"] {
+		t.Fatalf("AC-3 TC-3.2 no filter dropped a fact: %+v", res)
+	}
+
+	// AC-4 TC-4.1: project filter with zero facts → empty list, not error
+	res, err = a.Browse("nonexistent", "")
+	if err != nil {
+		t.Fatalf("AC-4 TC-4.2 Browse with nonexistent project: %v", err)
+	}
+	if len(res) != 0 {
+		t.Fatalf("AC-4 TC-4.1 zero-match project filter: want empty, got %+v", res)
 	}
 }
 
@@ -489,7 +600,7 @@ func TestAppGetAndDelete(t *testing.T) {
 		t.Fatal("Get still finds the fact after Delete")
 	}
 	// Index reflects the delete too.
-	res, _, err := a.Search("jwt", 10)
+	res, _, err := a.Search("jwt", 10, "", "")
 	must(t, err)
 	if len(res) != 0 {
 		t.Fatalf("search returns deleted fact: %v", res)
@@ -574,7 +685,7 @@ func TestVaultMoveRelocatesAndReindexes(t *testing.T) {
 	if !ok || got.Title != "Movable JWT" {
 		t.Fatalf("fact missing at dest: %+v ok=%v", got, ok)
 	}
-	res, _, err := nb.Search("jwt", 10)
+	res, _, err := nb.Search("jwt", 10, "", "")
 	must(t, err)
 	if len(res) == 0 {
 		t.Fatal("search returns nothing after move (index not rebuilt)")
@@ -775,7 +886,7 @@ func TestArchiveRemovesFromSearchAndGetArchivedFinds(t *testing.T) {
 	f, err := a.Save(store.SaveInput{Type: "decision", Title: "Zeta quokka tokens", Body: "quokka body",
 		Project: "p", Scope: "project"})
 	must(t, err)
-	res, _, err := a.Search("quokka", 10)
+	res, _, err := a.Search("quokka", 10, "", "")
 	must(t, err)
 	if len(res) != 1 {
 		t.Fatalf("pre-archive search = %+v, want 1 hit", res)
@@ -787,7 +898,7 @@ func TestArchiveRemovesFromSearchAndGetArchivedFinds(t *testing.T) {
 		t.Fatalf("Archive returned %+v", got)
 	}
 	// Q1/criterio 1: exact terms of the fact yield 0 hits post-archive.
-	res, _, err = a.Search("quokka", 10)
+	res, _, err = a.Search("quokka", 10, "", "")
 	must(t, err)
 	if len(res) != 0 {
 		t.Fatalf("post-archive search = %+v, want 0 hits", res)
@@ -818,7 +929,7 @@ func TestUnarchiveRestoresSearchAndEdges(t *testing.T) {
 	if _, err := a.Archive(f1.ID); err != nil {
 		t.Fatal(err)
 	}
-	if res, _, _ := a.Search("wombat", 10); len(res) != 0 {
+	if res, _, _ := a.Search("wombat", 10, "", ""); len(res) != 0 {
 		t.Fatalf("archived fact still in search: %+v", res)
 	}
 
@@ -828,7 +939,7 @@ func TestUnarchiveRestoresSearchAndEdges(t *testing.T) {
 		t.Fatalf("Unarchive returned %+v", got)
 	}
 	// Criterio: back in search AND edges re-indexed (IndexFact + IndexLinks).
-	res, _, err := a.Search("wombat", 10)
+	res, _, err := a.Search("wombat", 10, "", "")
 	must(t, err)
 	if len(res) != 1 || res[0].FactID != f1.ID {
 		t.Fatalf("post-unarchive search = %+v", res)
@@ -1056,7 +1167,7 @@ func TestSearchFlagsStaleIndex(t *testing.T) {
 	}
 	db.Close()
 
-	_, stale, err := a.Search("archive", 10)
+	_, stale, err := a.Search("archive", 10, "", "")
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}

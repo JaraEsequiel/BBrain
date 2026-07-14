@@ -82,7 +82,8 @@ bbrain init
 
 # Save and recall facts
 bbrain save --type decision --title "Use JWT for auth" --body "stateless tokens" --project myapp
-bbrain search "auth"
+bbrain search "auth" --project myapp   # --project/--type are optional filters
+bbrain list --project myapp            # browse without a query
 
 # Wire BBrain into Claude Code (MCP server + managed CLAUDE.md block + env)
 bbrain install
@@ -99,6 +100,7 @@ brain through MCP tools — from any working directory.
 | Tool | Purpose |
 |------|---------|
 | `mem_save` / `mem_search` / `mem_get` / `mem_delete` | save, recall, manage facts |
+| `mem_search` filters (`project`/`type`) / `mem_browse` | scope search to a project/type, or browse without a query |
 | `mem_link` / `mem_why` / `mem_related` / `mem_candidates` | build & query the knowledge graph |
 | `mem_current_project` | resolve the active project context |
 | `wiki_build` / `wiki_link` / `wiki_lint` | distil and maintain the wiki |

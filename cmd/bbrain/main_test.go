@@ -56,6 +56,88 @@ func TestEndToEndSaveAndSearch(t *testing.T) {
 	}
 }
 
+// BBRAIN-4 AC-6: bbrain search CLI --project/--type flags reach ix.Search;
+// TC-6.1 filtered, TC-6.2 no flags → identical to pre-change unfiltered behavior.
+func TestEndToEndSearchProjectFilter(t *testing.T) {
+	t.Setenv("BBRAIN_HOME", t.TempDir())
+	var out, errOut bytes.Buffer
+
+	if code := run([]string{"save", "--title", "alpha shared", "--body", "b", "--type", "decision", "--project", "bbrain"}, &out, &errOut); code != 0 {
+		t.Fatalf("save bbrain fact: code=%d stderr=%s", code, errOut.String())
+	}
+	out.Reset()
+	if code := run([]string{"save", "--title", "beta shared", "--body", "b", "--type", "decision", "--project", "vexforge"}, &out, &errOut); code != 0 {
+		t.Fatalf("save vexforge fact: code=%d stderr=%s", code, errOut.String())
+	}
+	out.Reset()
+
+	if code := run([]string{"search", "shared", "--project", "bbrain"}, &out, &errOut); code != 0 {
+		t.Fatalf("search: code=%d stderr=%s", code, errOut.String())
+	}
+	// AC-6 TC-6.1
+	if !strings.Contains(out.String(), "alpha shared") {
+		t.Fatalf("AC-6 TC-6.1 expected bbrain fact in output, got: %s", out.String())
+	}
+	if strings.Contains(out.String(), "beta shared") {
+		t.Fatalf("AC-6 TC-6.1 project filter leaked vexforge fact: %s", out.String())
+	}
+
+	out.Reset()
+	// AC-6 combined: --project + --type together
+	if code := run([]string{"search", "shared", "--project", "bbrain", "--type", "decision"}, &out, &errOut); code != 0 {
+		t.Fatalf("search combined: code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "alpha shared") {
+		t.Fatalf("AC-6 combined filter: expected bbrain/decision fact, got: %s", out.String())
+	}
+
+	out.Reset()
+	// AC-6 TC-6.2: no flags → identical to pre-change (unfiltered) behavior
+	if code := run([]string{"search", "shared"}, &out, &errOut); code != 0 {
+		t.Fatalf("search unfiltered: code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "alpha shared") || !strings.Contains(out.String(), "beta shared") {
+		t.Fatalf("AC-6 TC-6.2 unfiltered search should show both facts, got: %s", out.String())
+	}
+}
+
+// BBRAIN-5 AC-3/AC-5: bbrain list CLI --project flag matches mem_browse
+// filtering semantics; no filter lists all facts (project+type, title only,
+// per App.Browse's shape).
+func TestEndToEndList(t *testing.T) {
+	t.Setenv("BBRAIN_HOME", t.TempDir())
+	var out, errOut bytes.Buffer
+
+	if code := run([]string{"save", "--title", "bbrain fact", "--body", "b", "--type", "decision", "--project", "bbrain"}, &out, &errOut); code != 0 {
+		t.Fatalf("save: code=%d stderr=%s", code, errOut.String())
+	}
+	out.Reset()
+	if code := run([]string{"save", "--title", "vexforge fact", "--body", "b", "--type", "decision", "--project", "vexforge"}, &out, &errOut); code != 0 {
+		t.Fatalf("save: code=%d stderr=%s", code, errOut.String())
+	}
+	out.Reset()
+
+	// AC-5 TC-5.1: bbrain list --project prints the same fact set mem_browse would
+	if code := run([]string{"list", "--project", "bbrain"}, &out, &errOut); code != 0 {
+		t.Fatalf("list: code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "bbrain fact") {
+		t.Fatalf("AC-5 TC-5.1 expected bbrain fact in output, got: %s", out.String())
+	}
+	if strings.Contains(out.String(), "vexforge fact") {
+		t.Fatalf("AC-5 TC-5.1 project filter leaked vexforge fact: %s", out.String())
+	}
+
+	out.Reset()
+	// AC-5 TC-5.2: bbrain list with no flags matches AC-3's unfiltered behavior
+	if code := run([]string{"list"}, &out, &errOut); code != 0 {
+		t.Fatalf("list (no filter): code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "bbrain fact") || !strings.Contains(out.String(), "vexforge fact") {
+		t.Fatalf("AC-5 TC-5.2 no-filter list should show both facts, got: %s", out.String())
+	}
+}
+
 func TestEndToEndLinkWhyRelated(t *testing.T) {
 	t.Setenv("BBRAIN_HOME", t.TempDir())
 	var out, errOut bytes.Buffer
@@ -809,6 +891,53 @@ func TestEndToEndContext(t *testing.T) {
 	}
 }
 
+// Test that the search command handles the edge case where --project flag
+// is missing its value and is followed by another flag (--type).
+// Before the fix, --type would be silently consumed as the value of --project,
+// causing the project filter to never match and results to be incorrect.
+// After the fix, both --project and --type are treated as flags.
+func TestSearchFlagWithoutValueFollowedByAnotherFlag(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("BBRAIN_HOME", home)
+	var out, errOut bytes.Buffer
+
+	// Initialize
+	if code := run([]string{"init"}, &out, &errOut); code != 0 {
+		t.Fatalf("init failed: %s", errOut.String())
+	}
+
+	// Save a fact
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"save", "--title", "test decision", "--body", "b", "--type", "decision", "--project", "bbrain"}, &out, &errOut); code != 0 {
+		t.Fatalf("save fact: %s", errOut.String())
+	}
+
+	// Reindex to make sure the fact is searchable
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"reindex"}, &out, &errOut); code != 0 {
+		t.Fatalf("reindex failed: %s", errOut.String())
+	}
+
+	// Search with --project (no value) followed by --type decision
+	// The key thing is: this should not crash or silently fail
+	out.Reset()
+	errOut.Reset()
+	code := run([]string{"search", "test", "--project", "--type", "decision"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("search failed with exit code %d: %s", code, errOut.String())
+	}
+
+	// The search should return results for type=decision
+	// (since --project has no value, it's not filtering by project)
+	if !strings.Contains(out.String(), "test decision") {
+		t.Logf("search output: %q", out.String())
+		t.Logf("search stderr: %q", errOut.String())
+		t.Fatalf("search did not find the decision fact with type filter")
+	}
+}
+
 func TestPromptSubmitFirstMessage(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	t.Setenv("BBRAIN_HOME", t.TempDir())
@@ -822,5 +951,56 @@ func TestPromptSubmitFirstMessage(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "FIRST ACTION") {
 		t.Fatalf("want forced ToolSearch; got %q", out.String())
+	}
+}
+
+// Test reorderFlagsFirst: when a flag appears without a value (space-separated
+// form), the next token should only be consumed as the flag's value if it does
+// NOT start with "-". If the next token starts with "-", an empty string is
+// appended as the flag's value to prevent flag.Parse from consuming the next flag.
+func TestReorderFlagsFirstDoesNotConsumeFlagsAsValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []string
+		known    []string
+		wantLen  int
+		checkFn  func(t *testing.T, result []string)
+	}{
+		{
+			name:    "flag without value followed by another flag",
+			input:   []string{"foo", "--project", "--type", "bar"},
+			known:   []string{"project", "type"},
+			wantLen: 5, // --project, "", --type, bar, foo (empty string is added)
+			checkFn: func(t *testing.T, result []string) {
+				// Should have --project followed by empty string (to prevent flag.Parse from consuming next flag)
+				if len(result) >= 2 && result[0] == "--project" && result[1] == "" {
+					return
+				}
+				t.Fatalf("Expected --project followed by empty string, got: %v", result)
+			},
+		},
+		{
+			name:    "flag with value should still consume it",
+			input:   []string{"foo", "--project", "myproj", "--type", "decision"},
+			known:   []string{"project", "type"},
+			wantLen: 5,
+			checkFn: func(t *testing.T, result []string) {
+				// Should have --project followed by myproj
+				if len(result) >= 2 && result[0] == "--project" && result[1] == "myproj" {
+					return
+				}
+				t.Fatalf("Expected --project myproj, got: %v", result)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := reorderFlagsFirst(tt.input, tt.known...)
+			if len(got) != tt.wantLen {
+				t.Fatalf("length mismatch: got %d, want %d; got %v", len(got), tt.wantLen, got)
+			}
+			tt.checkFn(t, got)
+		})
 	}
 }

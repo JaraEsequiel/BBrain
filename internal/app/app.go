@@ -107,7 +107,7 @@ func (a *App) Save(in store.SaveInput) (fact.Fact, error) {
 // keeps the best-covering facts on top. Single-term queries are unaffected (AND
 // and OR are identical there). stale is true when the on-disk index predates
 // this ticket's tokenizer/schema change and hasn't been reindexed yet.
-func (a *App) Search(query string, limit int) (results []index.Result, stale bool, err error) {
+func (a *App) Search(query string, limit int, project, typ string) (results []index.Result, stale bool, err error) {
 	if err := a.ensureIndexDir(); err != nil {
 		return nil, false, err
 	}
@@ -116,12 +116,12 @@ func (a *App) Search(query string, limit int) (results []index.Result, stale boo
 		return nil, false, err
 	}
 	defer ix.Close()
-	res, err := ix.Search(query, limit)
+	res, err := ix.Search(query, limit, project, typ)
 	if err != nil {
 		return nil, ix.Stale(), err
 	}
 	if len(res) == 0 {
-		res, err = ix.SearchAny(query, limit)
+		res, err = ix.SearchAny(query, limit, project, typ)
 		return res, ix.Stale(), err
 	}
 	return res, ix.Stale(), nil
@@ -205,7 +205,7 @@ func (a *App) Candidates(id string, limit int) ([]index.Result, error) {
 	defer ix.Close()
 	// Over-fetch so that, after dropping self + already-linked, we can still return
 	// up to limit results.
-	res, err := ix.SearchAny(terms, limit+len(linked))
+	res, err := ix.SearchAny(terms, limit+len(linked), "", "") // ponytail: Candidates stays project/type-unscoped by design — mem_save's duplicate-hint and wiki_link's candidate discovery never asked for filtering, so no public param is exposed here; add one the moment a real caller needs it
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +218,36 @@ func (a *App) Candidates(id string, limit int) ([]index.Result, error) {
 		if len(out) == limit {
 			break
 		}
+	}
+	return out, nil
+}
+
+// BrowseResult is the minimal projection mem_browse/bbrain list return — title, id,
+// and type only, never a fact's full body (avoids flooding an agent's context on
+// what's meant to be a lightweight discovery step; full detail is a mem_get away).
+type BrowseResult struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Type  string `json:"type"`
+}
+
+// Browse lists facts filtered by project/type, strict exact-match, empty means
+// unfiltered. Deliberately NOT Context()'s leak-through semantics — a project-less
+// fact must never appear under a non-empty project filter here.
+func (a *App) Browse(project, typ string) ([]BrowseResult, error) {
+	facts, err := a.Store.ListFacts()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BrowseResult, 0, len(facts))
+	for _, f := range facts {
+		if project != "" && f.Project != project {
+			continue
+		}
+		if typ != "" && f.Type != typ {
+			continue
+		}
+		out = append(out, BrowseResult{ID: f.ID, Title: f.Title, Type: f.Type})
 	}
 	return out, nil
 }

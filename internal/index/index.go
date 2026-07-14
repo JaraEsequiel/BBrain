@@ -277,28 +277,39 @@ type Result struct {
 }
 
 // Search runs an FTS5 MATCH over title/body/tags/topic_key (all query terms
-// AND-ed), ranked by BM25.
-func (ix *Index) Search(query string, limit int) ([]Result, error) {
-	return ix.search(buildMatch(query), limit)
+// AND-ed), ranked by BM25. project/type, when non-empty, restrict results to an
+// exact match on those columns (both empty preserves the unfiltered behavior).
+func (ix *Index) Search(query string, limit int, project, typ string) ([]Result, error) {
+	return ix.search(buildMatch(query), limit, project, typ)
 }
 
 // SearchAny is like Search but matches facts containing ANY of the query terms
 // (OR semantics), ranked by BM25. It powers candidate/correlation discovery, where
 // a strict AND would miss facts that only partially overlap.
-func (ix *Index) SearchAny(query string, limit int) ([]Result, error) {
-	return ix.search(buildMatchAny(query), limit)
+func (ix *Index) SearchAny(query string, limit int, project, typ string) ([]Result, error) {
+	return ix.search(buildMatchAny(query), limit, project, typ)
 }
 
-func (ix *Index) search(match string, limit int) ([]Result, error) {
+func (ix *Index) search(match string, limit int, project, typ string) ([]Result, error) {
 	if match == "" {
 		return []Result{}, nil
 	}
-	rows, err := ix.db.Query(
-		`SELECT fact_id, title, type, project, path
-		 FROM facts_fts
-		 WHERE facts_fts MATCH ?
-		 ORDER BY rank
-		 LIMIT ?`, match, limit)
+	q := `SELECT fact_id, title, type, project, path
+	      FROM facts_fts
+	      WHERE facts_fts MATCH ?`
+	args := []any{match}
+	if project != "" {
+		q += ` AND project = ?`
+		args = append(args, project)
+	}
+	if typ != "" {
+		q += ` AND type = ?`
+		args = append(args, typ)
+	}
+	q += ` ORDER BY rank LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := ix.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}

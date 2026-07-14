@@ -48,7 +48,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func runWithIn(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates|wiki|mem|install|uninstall|context|prompt-submit|watch|vault|mcp> [args]")
+		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|list|reindex|link|why|related|candidates|wiki|mem|install|uninstall|context|prompt-submit|watch|vault|mcp> [args]")
 		return 2
 	}
 	switch args[0] {
@@ -76,6 +76,8 @@ func runWithIn(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdSave(args[1:], stdout, stderr)
 	case "search":
 		return cmdSearch(args[1:], stdout, stderr)
+	case "list":
+		return cmdList(args[1:], stdout, stderr)
 	case "link":
 		return cmdLink(args[1:], stdout, stderr)
 	case "why":
@@ -141,7 +143,12 @@ func cmdSearch(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	limit := fs.Int("limit", 20, "max results")
-	if err := fs.Parse(args); err != nil {
+	project := fs.String("project", "", "filter by project (optional)")
+	typ := fs.String("type", "", "filter by fact type (optional)")
+	// query is positional but --project/--type may follow it; flag.Parse only
+	// recognizes flags preceding the first positional arg, so move known
+	// flags ahead of the query terms first.
+	if err := fs.Parse(reorderFlagsFirst(args, "limit", "project", "type")); err != nil {
 		return 2
 	}
 	query := ""
@@ -156,7 +163,7 @@ func cmdSearch(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	a := app.New(brainRoot())
-	res, stale, err := a.Search(query, *limit)
+	res, stale, err := a.Search(query, *limit, *project, *typ)
 	if err != nil {
 		fmt.Fprintf(stderr, "search: %v\n", err)
 		return 1
@@ -168,6 +175,64 @@ func cmdSearch(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s\t%s\t%s\n", r.FactID, r.Type, r.Title)
 	}
 	return 0
+}
+
+func cmdList(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	project := fs.String("project", "", "filter by project (optional)")
+	typ := fs.String("type", "", "filter by fact type (optional)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	a := app.New(brainRoot())
+	res, err := a.Browse(*project, *typ)
+	if err != nil {
+		fmt.Fprintf(stderr, "list: %v\n", err)
+		return 1
+	}
+	for _, r := range res {
+		fmt.Fprintf(stdout, "%s\t%s\t%s\n", r.ID, r.Type, r.Title)
+	}
+	return 0
+}
+
+// reorderFlagsFirst moves each recognized --name/--name=value token (and, for
+// the space-separated form, its following value) ahead of the remaining
+// positional args, so flag.Parse — which stops at the first non-flag arg —
+// still recognizes flags typed after the positional query.
+//
+// If a space-separated flag is followed by another flag (starts with "-"),
+// an empty string is appended as its value to prevent flag.Parse from
+// treating the next flag as a value.
+func reorderFlagsFirst(args []string, names ...string) []string {
+	known := make(map[string]bool, len(names))
+	for _, n := range names {
+		known[n] = true
+	}
+	flags := make([]string, 0, len(args))
+	positional := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		name, _, hasEq := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		if !strings.HasPrefix(a, "-") || !known[name] {
+			positional = append(positional, a)
+			continue
+		}
+		flags = append(flags, a)
+		if !hasEq && i+1 < len(args) {
+			if strings.HasPrefix(args[i+1], "-") {
+				// Next arg is another flag, so append empty string to prevent
+				// flag.Parse from consuming the next flag as this flag's value
+				flags = append(flags, "")
+			} else {
+				// Next arg is not a flag, so consume it as this flag's value
+				i++
+				flags = append(flags, args[i])
+			}
+		}
+	}
+	return append(flags, positional...)
 }
 
 func cmdLink(args []string, stdout, stderr io.Writer) int {

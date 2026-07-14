@@ -117,22 +117,24 @@ func TestEndToEndList(t *testing.T) {
 	}
 	out.Reset()
 
+	// AC-5 TC-5.1: bbrain list --project prints the same fact set mem_browse would
 	if code := run([]string{"list", "--project", "bbrain"}, &out, &errOut); code != 0 {
 		t.Fatalf("list: code=%d stderr=%s", code, errOut.String())
 	}
 	if !strings.Contains(out.String(), "bbrain fact") {
-		t.Fatalf("expected bbrain fact in output, got: %s", out.String())
+		t.Fatalf("AC-5 TC-5.1 expected bbrain fact in output, got: %s", out.String())
 	}
 	if strings.Contains(out.String(), "vexforge fact") {
-		t.Fatalf("project filter leaked vexforge fact: %s", out.String())
+		t.Fatalf("AC-5 TC-5.1 project filter leaked vexforge fact: %s", out.String())
 	}
 
 	out.Reset()
+	// AC-5 TC-5.2: bbrain list with no flags matches AC-3's unfiltered behavior
 	if code := run([]string{"list"}, &out, &errOut); code != 0 {
 		t.Fatalf("list (no filter): code=%d stderr=%s", code, errOut.String())
 	}
 	if !strings.Contains(out.String(), "bbrain fact") || !strings.Contains(out.String(), "vexforge fact") {
-		t.Fatalf("no-filter list should show both facts, got: %s", out.String())
+		t.Fatalf("AC-5 TC-5.2 no-filter list should show both facts, got: %s", out.String())
 	}
 }
 

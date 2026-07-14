@@ -250,53 +250,69 @@ func TestBrowseFiltersByProjectStrictly(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	// AC-1: project filter returns only that project's facts, no full body in the shape
+	// AC-1 TC-1.1: project filter returns only that project's facts, no full body in the shape
 	res, err := a.Browse("bbrain", "")
 	if err != nil {
 		t.Fatalf("Browse: %v", err)
 	}
 	if len(res) != 1 || res[0].Title != "bbrain fact" {
-		t.Fatalf("project filter: want only bbrain fact, got %+v", res)
+		t.Fatalf("AC-1 TC-1.1 project filter: want only bbrain fact, got %+v", res)
 	}
-
-	// AC-6-TC-6.2: a non-empty project filter must never leak a project-less "global" fact through
+	// AC-1 TC-1.2: a fact belonging to another project never appears in the result set
 	for _, r := range res {
-		if r.Title == "global fact" {
-			t.Fatalf("strict project filter leaked a project-less fact: %+v", res)
+		if r.Title == "vexforge fact" {
+			t.Fatalf("AC-1 TC-1.2 project filter leaked vexforge fact: %+v", res)
 		}
 	}
 
-	// AC-2: type filter returns only that type — two other facts share type "decision"
+	// AC-6 TC-6.2: a non-empty project filter must never leak a project-less "global" fact through
+	for _, r := range res {
+		if r.Title == "global fact" {
+			t.Fatalf("AC-6 TC-6.2 strict project filter leaked a project-less fact: %+v", res)
+		}
+	}
+
+	// AC-2 TC-2.1: type filter returns only that type — two other facts share type "decision"
 	// (bbrain fact, global fact), so this also asserts strict exclusion of non-matching types.
 	res, err = a.Browse("", "preference")
 	if err != nil {
 		t.Fatalf("Browse: %v", err)
 	}
 	if len(res) != 1 || res[0].Title != "vexforge fact" {
-		t.Fatalf("type filter: want only vexforge fact, got %+v", res)
+		t.Fatalf("AC-2 TC-2.1 type filter: want only vexforge fact, got %+v", res)
 	}
+	// AC-2 TC-2.2: a non-matching-type fact never appears in the result set
 	for _, r := range res {
 		if r.Type != "preference" {
-			t.Fatalf("type filter leaked a non-matching type: %+v", res)
+			t.Fatalf("AC-2 TC-2.2 type filter leaked a non-matching type: %+v", res)
 		}
 	}
 
-	// AC-3: no filter → all facts
+	// AC-3 TC-3.1 / AC-6 TC-6.1: no filter (both empty, Go zero-values) → all facts,
+	// same as store.ListFacts() today
 	res, err = a.Browse("", "")
 	if err != nil {
 		t.Fatalf("Browse: %v", err)
 	}
 	if len(res) != 3 {
-		t.Fatalf("no filter: want all 3 facts, got %+v", res)
+		t.Fatalf("AC-3 TC-3.1 no filter: want all 3 facts, got %+v", res)
+	}
+	// AC-3 TC-3.2: confirms no facts are silently dropped when both filters are empty
+	seen := map[string]bool{}
+	for _, r := range res {
+		seen[r.Title] = true
+	}
+	if !seen["bbrain fact"] || !seen["vexforge fact"] || !seen["global fact"] {
+		t.Fatalf("AC-3 TC-3.2 no filter dropped a fact: %+v", res)
 	}
 
-	// AC-4: project filter with zero facts → empty list, not error
+	// AC-4 TC-4.1: project filter with zero facts → empty list, not error
 	res, err = a.Browse("nonexistent", "")
 	if err != nil {
-		t.Fatalf("Browse with nonexistent project: %v", err)
+		t.Fatalf("AC-4 TC-4.2 Browse with nonexistent project: %v", err)
 	}
 	if len(res) != 0 {
-		t.Fatalf("zero-match project filter: want empty, got %+v", res)
+		t.Fatalf("AC-4 TC-4.1 zero-match project filter: want empty, got %+v", res)
 	}
 }
 

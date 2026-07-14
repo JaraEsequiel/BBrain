@@ -23,6 +23,7 @@ func DefaultTools() []Tool {
 		{Name: "mem_why", Description: "Explain how two memories are directly related.", InputSchema: schemaMemWhy, Handler: handleMemWhy},
 		{Name: "mem_related", Description: "List memories linked to/from a memory.", InputSchema: schemaID, Handler: handleMemRelated},
 		{Name: "mem_candidates", Description: "Suggest memories lexically similar but not yet linked.", InputSchema: schemaMemCandidates, Handler: handleMemCandidates},
+		{Name: "mem_browse", Description: "List facts filtered by project/type, without a search query. Returns title+id+type only — use mem_get for the full body.", InputSchema: schemaMemBrowse, Handler: handleMemBrowse},
 		{Name: "mem_current_project", Description: "Best-effort current project (env BBRAIN_PROJECT or cwd basename).", InputSchema: schemaEmpty, Handler: handleCurrentProject},
 		{Name: "wiki_build", Description: "Distil facts into wiki pages via the configured LLM.", InputSchema: schemaWikiBuild, Handler: handleWikiBuild},
 		{Name: "wiki_link", Description: "Grow the fact graph via the configured LLM.", InputSchema: schemaWikiLink, Handler: handleWikiLink},
@@ -33,16 +34,17 @@ func DefaultTools() []Tool {
 // ---- schemas (hand-authored JSON Schema literals) ----
 
 var (
-	schemaEmpty   = json.RawMessage(`{"type":"object"}`)
-	schemaID      = json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`)
-	schemaMemSave = json.RawMessage(`{"type":"object","properties":{"type":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},"project":{"type":"string"},"scope":{"type":"string"},"topic_key":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"pinned":{"type":"boolean"}},"required":["type","title","body"]}`)
-	schemaMemSearch = json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"},"project":{"type":"string"},"type":{"type":"string"}},"required":["query"]}`)
-	schemaMemLink = json.RawMessage(`{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"relation":{"type":"string"},"why":{"type":"string"}},"required":["from","to","relation","why"]}`)
-	schemaMemWhy  = json.RawMessage(`{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"string"}},"required":["a","b"]}`)
+	schemaEmpty         = json.RawMessage(`{"type":"object"}`)
+	schemaID            = json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`)
+	schemaMemSave       = json.RawMessage(`{"type":"object","properties":{"type":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},"project":{"type":"string"},"scope":{"type":"string"},"topic_key":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"pinned":{"type":"boolean"}},"required":["type","title","body"]}`)
+	schemaMemSearch     = json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"},"project":{"type":"string"},"type":{"type":"string"}},"required":["query"]}`)
+	schemaMemLink       = json.RawMessage(`{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"relation":{"type":"string"},"why":{"type":"string"}},"required":["from","to","relation","why"]}`)
+	schemaMemWhy        = json.RawMessage(`{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"string"}},"required":["a","b"]}`)
 	schemaMemCandidates = json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"limit":{"type":"integer"}},"required":["id"]}`)
-	schemaWikiBuild = json.RawMessage(`{"type":"object","properties":{"project":{"type":"string"},"scope":{"type":"string"},"categories":{"type":"array","items":{"type":"string"}},"dry_run":{"type":"boolean"}}}`)
-	schemaWikiLink  = json.RawMessage(`{"type":"object","properties":{"project":{"type":"string"},"scope":{"type":"string"},"limit":{"type":"integer"},"dry_run":{"type":"boolean"}}}`)
-	schemaWikiLint  = json.RawMessage(`{"type":"object","properties":{"categories":{"type":"array","items":{"type":"string"}},"fix":{"type":"boolean"}}}`)
+	schemaMemBrowse     = json.RawMessage(`{"type":"object","properties":{"project":{"type":"string"},"type":{"type":"string"}}}`)
+	schemaWikiBuild     = json.RawMessage(`{"type":"object","properties":{"project":{"type":"string"},"scope":{"type":"string"},"categories":{"type":"array","items":{"type":"string"}},"dry_run":{"type":"boolean"}}}`)
+	schemaWikiLink      = json.RawMessage(`{"type":"object","properties":{"project":{"type":"string"},"scope":{"type":"string"},"limit":{"type":"integer"},"dry_run":{"type":"boolean"}}}`)
+	schemaWikiLint      = json.RawMessage(`{"type":"object","properties":{"categories":{"type":"array","items":{"type":"string"}},"fix":{"type":"boolean"}}}`)
 )
 
 // ---- views ----
@@ -238,6 +240,21 @@ func handleMemCandidates(ctx context.Context, a *app.App, raw json.RawMessage) (
 		return nil, err
 	}
 	return map[string]any{"candidates": res}, nil
+}
+
+func handleMemBrowse(ctx context.Context, a *app.App, raw json.RawMessage) (any, error) {
+	var in struct {
+		Project string `json:"project"`
+		Type    string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return nil, err
+	}
+	res, err := a.Browse(in.Project, in.Type)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"results": res}, nil
 }
 
 func handleCurrentProject(ctx context.Context, a *app.App, raw json.RawMessage) (any, error) {

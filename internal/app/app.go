@@ -107,7 +107,7 @@ func (a *App) Save(in store.SaveInput) (fact.Fact, error) {
 // keeps the best-covering facts on top. Single-term queries are unaffected (AND
 // and OR are identical there). stale is true when the on-disk index predates
 // this ticket's tokenizer/schema change and hasn't been reindexed yet.
-func (a *App) Search(query string, limit int) (results []index.Result, stale bool, err error) {
+func (a *App) Search(query string, limit int, project, typ string) (results []index.Result, stale bool, err error) {
 	if err := a.ensureIndexDir(); err != nil {
 		return nil, false, err
 	}
@@ -116,12 +116,12 @@ func (a *App) Search(query string, limit int) (results []index.Result, stale boo
 		return nil, false, err
 	}
 	defer ix.Close()
-	res, err := ix.Search(query, limit)
+	res, err := ix.Search(query, limit, project, typ)
 	if err != nil {
 		return nil, ix.Stale(), err
 	}
 	if len(res) == 0 {
-		res, err = ix.SearchAny(query, limit)
+		res, err = ix.SearchAny(query, limit, project, typ)
 		return res, ix.Stale(), err
 	}
 	return res, ix.Stale(), nil
@@ -205,7 +205,7 @@ func (a *App) Candidates(id string, limit int) ([]index.Result, error) {
 	defer ix.Close()
 	// Over-fetch so that, after dropping self + already-linked, we can still return
 	// up to limit results.
-	res, err := ix.SearchAny(terms, limit+len(linked))
+	res, err := ix.SearchAny(terms, limit+len(linked), "", "") // ponytail: Candidates unscoped (D4) — no public filter param, no AC/caller needs it
 	if err != nil {
 		return nil, err
 	}

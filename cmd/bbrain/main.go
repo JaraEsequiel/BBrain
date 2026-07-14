@@ -48,7 +48,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func runWithIn(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|reindex|link|why|related|candidates|wiki|mem|install|uninstall|context|prompt-submit|watch|vault|mcp> [args]")
+		fmt.Fprintln(stderr, "usage: bbrain <version|init|save|search|list|reindex|link|why|related|candidates|wiki|mem|install|uninstall|context|prompt-submit|watch|vault|mcp> [args]")
 		return 2
 	}
 	switch args[0] {
@@ -76,6 +76,8 @@ func runWithIn(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdSave(args[1:], stdout, stderr)
 	case "search":
 		return cmdSearch(args[1:], stdout, stderr)
+	case "list":
+		return cmdList(args[1:], stdout, stderr)
 	case "link":
 		return cmdLink(args[1:], stdout, stderr)
 	case "why":
@@ -171,6 +173,26 @@ func cmdSearch(args []string, stdout, stderr io.Writer) int {
 	}
 	for _, r := range res {
 		fmt.Fprintf(stdout, "%s\t%s\t%s\n", r.FactID, r.Type, r.Title)
+	}
+	return 0
+}
+
+func cmdList(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	project := fs.String("project", "", "filter by project (optional)")
+	typ := fs.String("type", "", "filter by fact type (optional)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	a := app.New(brainRoot())
+	res, err := a.Browse(*project, *typ)
+	if err != nil {
+		fmt.Fprintf(stderr, "list: %v\n", err)
+		return 1
+	}
+	for _, r := range res {
+		fmt.Fprintf(stdout, "%s\t%s\t%s\n", r.ID, r.Type, r.Title)
 	}
 	return 0
 }

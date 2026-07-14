@@ -36,7 +36,7 @@ var (
 	schemaEmpty   = json.RawMessage(`{"type":"object"}`)
 	schemaID      = json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`)
 	schemaMemSave = json.RawMessage(`{"type":"object","properties":{"type":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},"project":{"type":"string"},"scope":{"type":"string"},"topic_key":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"pinned":{"type":"boolean"}},"required":["type","title","body"]}`)
-	schemaMemSearch = json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}`)
+	schemaMemSearch = json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"},"project":{"type":"string"},"type":{"type":"string"}},"required":["query"]}`)
 	schemaMemLink = json.RawMessage(`{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"relation":{"type":"string"},"why":{"type":"string"}},"required":["from","to","relation","why"]}`)
 	schemaMemWhy  = json.RawMessage(`{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"string"}},"required":["a","b"]}`)
 	schemaMemCandidates = json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"limit":{"type":"integer"}},"required":["id"]}`)
@@ -111,8 +111,10 @@ func handleMemSave(ctx context.Context, a *app.App, raw json.RawMessage) (any, e
 
 func handleMemSearch(ctx context.Context, a *app.App, raw json.RawMessage) (any, error) {
 	var in struct {
-		Query string `json:"query"`
-		Limit int    `json:"limit"`
+		Query   string `json:"query"`
+		Limit   int    `json:"limit"`
+		Project string `json:"project"`
+		Type    string `json:"type"`
 	}
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return nil, err
@@ -120,7 +122,7 @@ func handleMemSearch(ctx context.Context, a *app.App, raw json.RawMessage) (any,
 	if in.Limit <= 0 {
 		in.Limit = 10
 	}
-	res, stale, err := a.Search(in.Query, in.Limit, "", "") // ponytail: arity fix only, Task 4 wires project/type into mem_search
+	res, stale, err := a.Search(in.Query, in.Limit, in.Project, in.Type)
 	if err != nil {
 		return nil, err
 	}

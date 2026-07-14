@@ -222,6 +222,36 @@ func (a *App) Candidates(id string, limit int) ([]index.Result, error) {
 	return out, nil
 }
 
+// BrowseResult is the minimal projection mem_browse/bbrain list return — title, id,
+// and type only, never a fact's full body (avoids flooding an agent's context on
+// what's meant to be a lightweight discovery step; full detail is a mem_get away).
+type BrowseResult struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Type  string `json:"type"`
+}
+
+// Browse lists facts filtered by project/type, strict exact-match, empty means
+// unfiltered. Deliberately NOT Context()'s leak-through semantics — a project-less
+// fact must never appear under a non-empty project filter here.
+func (a *App) Browse(project, typ string) ([]BrowseResult, error) {
+	facts, err := a.Store.ListFacts()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BrowseResult, 0, len(facts))
+	for _, f := range facts {
+		if project != "" && f.Project != project {
+			continue
+		}
+		if typ != "" && f.Type != typ {
+			continue
+		}
+		out = append(out, BrowseResult{ID: f.ID, Title: f.Title, Type: f.Type})
+	}
+	return out, nil
+}
+
 // WikiBuildOptions configures App.WikiBuild.
 type WikiBuildOptions struct {
 	Project    string

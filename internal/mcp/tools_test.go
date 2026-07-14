@@ -34,7 +34,7 @@ func call(t *testing.T, a *app.App, name, args string) string {
 
 // BBRAIN-5: catalog must include mem_browse.
 func TestCatalogHasExpectedTools(t *testing.T) {
-	want := []string{"mem_save", "mem_search", "mem_get", "mem_delete", "mem_link", "mem_why", "mem_related", "mem_candidates", "mem_current_project", "mem_browse", "wiki_build", "wiki_link", "wiki_lint"}
+	want := []string{"mem_save", "mem_search", "mem_get", "mem_delete", "mem_link", "mem_why", "mem_related", "mem_candidates", "mem_current_project", "mem_browse", "wiki_build", "wiki_link", "wiki_lint", "mem_archive", "mem_unarchive"}
 	have := map[string]bool{}
 	for _, tl := range DefaultTools() {
 		have[tl.Name] = true
@@ -294,6 +294,194 @@ func TestHandleMemSavePinned(t *testing.T) {
 	}
 	if !found || !got.Pinned {
 		t.Fatalf("pinned not persisted: found=%v fact=%+v", found, got)
+	}
+}
+
+// BBRAIN-7
+
+func TestMemArchiveKnownId(t *testing.T) {
+	// AC-1: mem_archive with a known id archives the fact
+	// AC-2: response includes the archived id
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	out := call(t, a, "mem_save", `{"type":"decision","title":"x","body":"y","project":"p","scope":"project"}`)
+	var saved map[string]any
+	if err := json.Unmarshal([]byte(out), &saved); err != nil {
+		t.Fatal(err)
+	}
+	id, _ := saved["id"].(string)
+
+	res := call(t, a, "mem_archive", `{"ids":["`+id+`"]}`)
+	if !strings.Contains(res, `"count":1`) {
+		t.Fatalf("AC-1/AC-2: mem_archive count = %s", res)
+	}
+	if !strings.Contains(res, id) {
+		t.Fatalf("AC-2: mem_archive response missing archived id: %s", res)
+	}
+	if _, ok, err := a.GetArchived(id); err != nil || !ok {
+		t.Fatalf("AC-1: fact not archived after mem_archive: ok=%v err=%v", ok, err)
+	}
+	if _, ok, _ := a.Get(id); ok {
+		t.Fatal("AC-1: fact still active after mem_archive")
+	}
+}
+
+func TestMemArchiveBatchCount(t *testing.T) {
+	// AC-3: batch archive reports correct count
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for i := 0; i < 2; i++ {
+		out := call(t, a, "mem_save", `{"type":"decision","title":"x","body":"y","project":"p","scope":"project"}`)
+		var saved map[string]any
+		json.Unmarshal([]byte(out), &saved)
+		id, _ := saved["id"].(string)
+		ids = append(ids, id)
+	}
+	res := call(t, a, "mem_archive", `{"ids":["`+ids[0]+`","`+ids[1]+`"]}`)
+	if !strings.Contains(res, `"count":2`) {
+		t.Fatalf("AC-3: expected count 2, got %s", res)
+	}
+}
+
+func TestMemArchiveUnknownIdSkippedNotCrashed(t *testing.T) {
+	// AC-7: unknown id doesn't crash the tool
+	// AC-8: unknown id is never falsely reported as archived
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	out := call(t, a, "mem_save", `{"type":"decision","title":"x","body":"y","project":"p","scope":"project"}`)
+	var saved map[string]any
+	json.Unmarshal([]byte(out), &saved)
+	knownID, _ := saved["id"].(string)
+
+	res := call(t, a, "mem_archive", `{"ids":["`+knownID+`","unknown-id-zzz"]}`)
+	if !strings.Contains(res, `"count":1`) {
+		t.Fatalf("AC-7/AC-8: expected only the known id archived, got %s", res)
+	}
+	if strings.Contains(res, "unknown-id-zzz") {
+		t.Fatalf("AC-8: unknown id falsely reported as archived: %s", res)
+	}
+	if _, ok, err := a.GetArchived(knownID); err != nil || !ok {
+		t.Fatal("AC-7: known id in a mixed batch must still archive")
+	}
+}
+
+func TestMemArchivePinnedFactSkipped(t *testing.T) {
+	// design D2 / candidate AC: a pinned fact is skipped, not a batch abort
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	out := call(t, a, "mem_save", `{"type":"decision","title":"x","body":"y","project":"p","scope":"project","pinned":true}`)
+	var saved map[string]any
+	json.Unmarshal([]byte(out), &saved)
+	id, _ := saved["id"].(string)
+
+	res := call(t, a, "mem_archive", `{"ids":["`+id+`"]}`)
+	if !strings.Contains(res, `"count":0`) {
+		t.Fatalf("pinned fact must be skipped, not archived: %s", res)
+	}
+}
+
+func TestMemArchiveEmptyIdsReturnsZeroCount(t *testing.T) {
+	// design D2: empty ids is the degenerate zero-iteration case, no error
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	res := call(t, a, "mem_archive", `{"ids":[]}`)
+	if !strings.Contains(res, `"count":0`) {
+		t.Fatalf("empty ids must return count 0, not an error: %s", res)
+	}
+}
+
+func TestMemArchiveSchemaIsIdListOnly(t *testing.T) {
+	// AC-6: schema is id-list-only, no filter/bulk fields
+	schema := string(toolByName(t, "mem_archive").InputSchema)
+	for _, forbidden := range []string{"older-than", "distilled", "\"project\"", "\"apply\"", "\"type\""} {
+		if strings.Contains(schema, forbidden) {
+			t.Fatalf("AC-6: mem_archive schema must not contain %q: %s", forbidden, schema)
+		}
+	}
+	if !strings.Contains(schema, `"ids"`) {
+		t.Fatalf("AC-6: mem_archive schema must declare \"ids\": %s", schema)
+	}
+}
+
+func TestMemGetAfterArchiveReturnsArchivedTrue(t *testing.T) {
+	// AC-9: mem_get on an archived id still returns archived:true (no regression)
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	out := call(t, a, "mem_save", `{"type":"decision","title":"x","body":"y","project":"p","scope":"project"}`)
+	var saved map[string]any
+	json.Unmarshal([]byte(out), &saved)
+	id, _ := saved["id"].(string)
+	call(t, a, "mem_archive", `{"ids":["`+id+`"]}`)
+
+	got := call(t, a, "mem_get", `{"id":"`+id+`"}`)
+	if !strings.Contains(got, `"archived":true`) {
+		t.Fatalf("AC-9: mem_get after mem_archive must return archived:true, got %s", got)
+	}
+}
+
+func TestMemUnarchiveKnownId(t *testing.T) {
+	// AC-4: mem_unarchive with a known id unarchives the fact
+	// AC-5: unarchive response confirms id + count
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	out := call(t, a, "mem_save", `{"type":"decision","title":"x","body":"y","project":"p","scope":"project"}`)
+	var saved map[string]any
+	json.Unmarshal([]byte(out), &saved)
+	id, _ := saved["id"].(string)
+	call(t, a, "mem_archive", `{"ids":["`+id+`"]}`)
+
+	res := call(t, a, "mem_unarchive", `{"ids":["`+id+`"]}`)
+	if !strings.Contains(res, `"count":1`) || !strings.Contains(res, id) {
+		t.Fatalf("AC-5: mem_unarchive response = %s", res)
+	}
+	if _, ok, _ := a.Get(id); !ok {
+		t.Fatal("AC-4: fact not active after mem_unarchive")
+	}
+	if _, ok, _ := a.GetArchived(id); ok {
+		t.Fatal("AC-4: fact still in archive tier after mem_unarchive")
+	}
+}
+
+func TestMemUnarchiveUnknownIdSkippedNotCrashed(t *testing.T) {
+	// AC-7/AC-8 mirrored for unarchive
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	res := call(t, a, "mem_unarchive", `{"ids":["unknown-id-zzz"]}`)
+	if !strings.Contains(res, `"count":0`) {
+		t.Fatalf("unknown id must not be unarchived: %s", res)
+	}
+	if strings.Contains(res, "unknown-id-zzz") {
+		t.Fatalf("unknown id falsely reported: %s", res)
+	}
+}
+
+func TestMemUnarchiveSchemaIsIdListOnly(t *testing.T) {
+	// AC-6, mem_unarchive half
+	schema := string(toolByName(t, "mem_unarchive").InputSchema)
+	for _, forbidden := range []string{"older-than", "distilled", "\"project\"", "\"apply\"", "\"type\""} {
+		if strings.Contains(schema, forbidden) {
+			t.Fatalf("AC-6: mem_unarchive schema must not contain %q: %s", forbidden, schema)
+		}
+	}
+	if !strings.Contains(schema, `"ids"`) {
+		t.Fatalf("AC-6: mem_unarchive schema must declare \"ids\": %s", schema)
 	}
 }
 

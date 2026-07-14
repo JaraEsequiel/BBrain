@@ -1,6 +1,7 @@
 package prompthook
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -26,5 +27,16 @@ func TestDecide(t *testing.T) {
 				t.Fatalf("decide(%+v) = {%q,%v}; want {%q,%v}", c.in, got.Message, got.DidNudge, c.wantMsg, c.wantNudge)
 			}
 		})
+	}
+}
+
+// BBRAIN-7
+
+func TestToolSearchMsgListsArchiveTools(t *testing.T) {
+	// AC-10: toolSearchMsg lists mem_archive/mem_unarchive
+	for _, name := range []string{"mcp__bbrain__mem_archive", "mcp__bbrain__mem_unarchive"} {
+		if !strings.Contains(toolSearchMsg, name) {
+			t.Fatalf("AC-10: toolSearchMsg missing %q", name)
+		}
 	}
 }

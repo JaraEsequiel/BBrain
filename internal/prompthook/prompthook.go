@@ -11,7 +11,7 @@ const (
 	nudgeCooldown = 15 * time.Minute // do not repeat a nudge within this window
 )
 
-const toolSearchMsg = "FIRST ACTION — before responding, run this ToolSearch once to load BBrain's memory tools (they are deferred and not yet callable):\nselect:mcp__bbrain__mem_save,mcp__bbrain__mem_search,mcp__bbrain__mem_get,mcp__bbrain__mem_delete,mcp__bbrain__mem_link,mcp__bbrain__mem_why,mcp__bbrain__mem_related,mcp__bbrain__mem_candidates,mcp__bbrain__mem_current_project,mcp__bbrain__wiki_build,mcp__bbrain__wiki_link,mcp__bbrain__wiki_lint"
+const toolSearchMsg = "FIRST ACTION — before responding, run this ToolSearch once to load BBrain's memory tools (they are deferred and not yet callable):\nselect:mcp__bbrain__mem_save,mcp__bbrain__mem_search,mcp__bbrain__mem_get,mcp__bbrain__mem_delete,mcp__bbrain__mem_link,mcp__bbrain__mem_why,mcp__bbrain__mem_related,mcp__bbrain__mem_candidates,mcp__bbrain__mem_current_project,mcp__bbrain__wiki_build,mcp__bbrain__wiki_link,mcp__bbrain__wiki_lint,mcp__bbrain__mem_archive,mcp__bbrain__mem_unarchive"
 
 const nudgeMsg = "MEMORY CHECK — over 15 minutes since your last save to this project. If anything since then is worth remembering (a decision, discovery, fixed bug, or fact about the user), call mem_save now. If nothing is, ignore this and continue."
 

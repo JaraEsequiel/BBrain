@@ -200,8 +200,14 @@ func TestMemRelatedToleratesArchivedNeighbor(t *testing.T) {
 	ix.Close()
 
 	// The A→B edge is now dangling in `links` — mem_related must still return it.
-	if r := call(t, a, "mem_related", `{"id":"`+idA+`"}`); !strings.Contains(r, idB) {
+	r := call(t, a, "mem_related", `{"id":"`+idA+`"}`)
+	if !strings.Contains(r, idB) {
 		t.Fatalf("mem_related should keep the edge to the archived fact %s, got: %s", idB, r)
+	}
+	// BBRAIN-10 AC-5: the dangling neighbor's title/snippet must be empty, not
+	// absent or erroring — and the old (now-stale) title must not leak through.
+	if strings.Contains(r, "Session storage") {
+		t.Fatalf("mem_related leaked the archived fact's stale title: %s", r)
 	}
 }
 
@@ -562,5 +568,38 @@ func TestMemCandidatesIncludesSnippet(t *testing.T) {
 	cr := call(t, a, "mem_candidates", fmt.Sprintf(`{"id":%q}`, id1))
 	if !strings.Contains(cr, `"snippet"`) {
 		t.Fatalf("mem_candidates result missing snippet key: %s", cr)
+	}
+}
+
+func TestMemRelatedIncludesTitleAndSnippet(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	idA := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"Auth model","body":"jwt","project":"p","scope":"project"}`))
+	idB := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"Session storage","body":"redis backed sessions","project":"p","scope":"project"}`))
+	call(t, a, "mem_link", `{"from":"`+idA+`","to":"`+idB+`","relation":"depends-on","why":"auth needs sessions"}`)
+
+	r := call(t, a, "mem_related", `{"id":"`+idA+`"}`)
+	if !strings.Contains(r, `"title":"Session storage"`) {
+		t.Fatalf("mem_related missing neighbor title: %s", r)
+	}
+	if !strings.Contains(r, `"snippet"`) {
+		t.Fatalf("mem_related missing snippet key: %s", r)
+	}
+}
+
+func TestMemWhyIncludesTitleAndSnippet(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	idA := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"Auth model","body":"jwt","project":"p","scope":"project"}`))
+	idB := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"Session storage","body":"redis backed sessions","project":"p","scope":"project"}`))
+	call(t, a, "mem_link", `{"from":"`+idA+`","to":"`+idB+`","relation":"depends-on","why":"auth needs sessions"}`)
+
+	r := call(t, a, "mem_why", `{"a":"`+idA+`","b":"`+idB+`"}`)
+	if !strings.Contains(r, `"src_title":"Auth model"`) || !strings.Contains(r, `"dst_title":"Session storage"`) {
+		t.Fatalf("mem_why missing src/dst titles: %s", r)
 	}
 }

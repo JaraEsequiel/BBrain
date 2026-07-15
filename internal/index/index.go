@@ -25,6 +25,12 @@ type Index struct {
 // on-disk index (see isStale).
 const indexSchemaVersion = 1
 
+// snippetTokens is the FTS5 snippet() token budget approximating the ~160-char
+// preview cap. ponytail: tuned by eye against real fact bodies during design;
+// adjust here if previews read too short/long in practice — no other code depends on the exact
+// value.
+const snippetTokens = 28
+
 // schema: a single standalone FTS5 table. Searchable columns (title, body, tags,
 // topic_key) are tokenized; identifiers/filters (fact_id, path, type, scope,
 // project) are UNINDEXED so they are stored verbatim and usable in WHERE.
@@ -274,6 +280,7 @@ type Result struct {
 	Type    string `json:"type"`
 	Project string `json:"project"`
 	Path    string `json:"path"`
+	Snippet string `json:"snippet"`
 }
 
 // Search runs an FTS5 MATCH over title/body/tags/topic_key (all query terms
@@ -294,10 +301,10 @@ func (ix *Index) search(match string, limit int, project, typ string) ([]Result,
 	if match == "" {
 		return []Result{}, nil
 	}
-	q := `SELECT fact_id, title, type, project, path
+	q := `SELECT fact_id, title, type, project, path, snippet(facts_fts, 3, '', '', '...', ?)
 	      FROM facts_fts
 	      WHERE facts_fts MATCH ?`
-	args := []any{match}
+	args := []any{snippetTokens, match}
 	if project != "" {
 		q += ` AND project = ?`
 		args = append(args, project)
@@ -318,9 +325,14 @@ func (ix *Index) search(match string, limit int, project, typ string) ([]Result,
 	out := make([]Result, 0)
 	for rows.Next() {
 		var r Result
-		if err := rows.Scan(&r.FactID, &r.Title, &r.Type, &r.Project, &r.Path); err != nil {
+		if err := rows.Scan(&r.FactID, &r.Title, &r.Type, &r.Project, &r.Path, &r.Snippet); err != nil {
 			return nil, err
 		}
+		// The FTS5 snippet() builtin preserves the source body's raw whitespace/newlines
+		// verbatim (confirmed by spike) — it does not collapse them like the ticket's
+		// AC-3 requires. Normalize here; word-boundary safety (AC-2) is untouched since
+		// this only folds runs of whitespace, never splits a word.
+		r.Snippet = strings.Join(strings.Fields(r.Snippet), " ")
 		out = append(out, r)
 	}
 	return out, rows.Err()

@@ -2,6 +2,7 @@ package index
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 
 	"github.com/JaraEsequiel/BBrain/internal/fact"
@@ -493,5 +494,89 @@ func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSearchIncludesSnippetContainingTerm(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("f1", "Archive fact",
+		"This is a long body about how to archive old notes and keep the index tidy for later retrieval.",
+		"decision", "bbrain"), "/x/f1.md"))
+
+	res, err := ix.Search("archive", 10, "", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("Search(archive) = %+v, want 1 result", res)
+	}
+	if res[0].Snippet == "" {
+		t.Fatalf("Snippet is empty, want non-empty")
+	}
+	if !strings.Contains(strings.ToLower(res[0].Snippet), "archive") {
+		t.Fatalf("Snippet %q does not contain the search term", res[0].Snippet)
+	}
+}
+
+func TestSearchSnippetNeverCutsMidWord(t *testing.T) {
+	ix := openMem(t)
+	body := "This body repeats the marker word transformation many times to guarantee the " +
+		"snippet needs truncation for the query term marker across a long enough span of text " +
+		"that the token budget forces a cut somewhere before the body actually ends for real."
+	must(t, ix.IndexFact(sampleFact("f1", "Long fact", body, "decision", "bbrain"), "/x/f1.md"))
+
+	res, err := ix.Search("marker", 10, "", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("want 1 result, got %d", len(res))
+	}
+
+	bodyWords := make(map[string]bool)
+	for _, w := range strings.Fields(body) {
+		bodyWords[strings.Trim(w, ".,")] = true
+	}
+	snip := strings.TrimSuffix(res[0].Snippet, "...")
+	for _, w := range strings.Fields(snip) {
+		w = strings.Trim(w, ".,")
+		if w == "" {
+			continue
+		}
+		if !bodyWords[w] {
+			t.Fatalf("snippet %q contains %q, not a whole word from the source body — likely a mid-word cut",
+				res[0].Snippet, w)
+		}
+	}
+}
+
+func TestSearchSnippetReturnsFullShortBodyWhitespaceCollapsed(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("f1", "Short fact", "Tiny  body\n\n  here.",
+		"decision", "bbrain"), "/x/f1.md"))
+
+	res, err := ix.Search("tiny", 10, "", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("want 1 result, got %d", len(res))
+	}
+	if res[0].Snippet != "Tiny body here." {
+		t.Fatalf("Snippet = %q, want whitespace-collapsed full body %q", res[0].Snippet, "Tiny body here.")
+	}
+}
+
+func TestSearchNoMatchesReturnsEmptyNoError(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("f1", "Fact", "unrelated content",
+		"decision", "bbrain"), "/x/f1.md"))
+
+	res, err := ix.Search("nonexistentterm", 10, "", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 0 {
+		t.Fatalf("want 0 results, got %d", len(res))
 	}
 }

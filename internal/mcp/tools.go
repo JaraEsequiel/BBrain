@@ -37,7 +37,7 @@ func DefaultTools() []Tool {
 var (
 	schemaEmpty         = json.RawMessage(`{"type":"object"}`)
 	schemaID            = json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`)
-	schemaIDs           = json.RawMessage(`{"properties":{"ids":{"items":{}}},"required":["ids"]}`)
+	schemaIDs           = json.RawMessage(`{"type":"object","properties":{"ids":{"type":"array","items":{"type":"string"}}},"required":["ids"]}`)
 	schemaMemSave       = json.RawMessage(`{"type":"object","properties":{"type":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},"project":{"type":"string"},"scope":{"type":"string"},"topic_key":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"pinned":{"type":"boolean"}},"required":["type","title","body"]}`)
 	schemaMemSearch     = json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"},"project":{"type":"string"},"type":{"type":"string"}},"required":["query"]}`)
 	schemaMemLink       = json.RawMessage(`{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"relation":{"type":"string"},"why":{"type":"string"}},"required":["from","to","relation","why"]}`)

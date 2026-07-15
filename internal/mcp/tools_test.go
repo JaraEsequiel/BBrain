@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -336,7 +337,7 @@ func TestMemArchiveBatchCount(t *testing.T) {
 	}
 	var ids []string
 	for i := 0; i < 2; i++ {
-		out := call(t, a, "mem_save", `{"type":"decision","title":"x","body":"y","project":"p","scope":"project"}`)
+		out := call(t, a, "mem_save", `{"type":"decision","title":"x`+strconv.Itoa(i)+`","body":"y","project":"p","scope":"project"}`)
 		var saved map[string]any
 		json.Unmarshal([]byte(out), &saved)
 		id, _ := saved["id"].(string)
@@ -404,7 +405,7 @@ func TestMemArchiveEmptyIdsReturnsZeroCount(t *testing.T) {
 func TestMemArchiveSchemaIsIdListOnly(t *testing.T) {
 	// AC-6: schema is id-list-only, no filter/bulk fields
 	schema := string(toolByName(t, "mem_archive").InputSchema)
-	for _, forbidden := range []string{"older-than", "distilled", "\"project\"", "\"apply\"", "\"type\""} {
+	for _, forbidden := range []string{"older-than", "distilled", "\"project\"", "\"apply\"", "\"type\":{"} {
 		if strings.Contains(schema, forbidden) {
 			t.Fatalf("AC-6: mem_archive schema must not contain %q: %s", forbidden, schema)
 		}
@@ -475,7 +476,7 @@ func TestMemUnarchiveUnknownIdSkippedNotCrashed(t *testing.T) {
 func TestMemUnarchiveSchemaIsIdListOnly(t *testing.T) {
 	// AC-6, mem_unarchive half
 	schema := string(toolByName(t, "mem_unarchive").InputSchema)
-	for _, forbidden := range []string{"older-than", "distilled", "\"project\"", "\"apply\"", "\"type\""} {
+	for _, forbidden := range []string{"older-than", "distilled", "\"project\"", "\"apply\"", "\"type\":{"} {
 		if strings.Contains(schema, forbidden) {
 			t.Fatalf("AC-6: mem_unarchive schema must not contain %q: %s", forbidden, schema)
 		}

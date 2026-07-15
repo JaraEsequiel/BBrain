@@ -239,7 +239,7 @@ func (ix *Index) Why(aID, bID string) ([]Edge, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Edge
+	out := make([]Edge, 0)
 	for rows.Next() {
 		var e Edge
 		if err := rows.Scan(&e.SrcID, &e.DstID, &e.Relation, &e.Why); err != nil {
@@ -280,7 +280,7 @@ func (ix *Index) Neighbors(id string) ([]Neighbor, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Neighbor
+	out := make([]Neighbor, 0)
 	for rows.Next() {
 		var n Neighbor
 		var title sql.NullString

@@ -603,3 +603,31 @@ func TestMemWhyIncludesTitleAndSnippet(t *testing.T) {
 		t.Fatalf("mem_why missing src/dst titles: %s", r)
 	}
 }
+
+// s10 review finding: Neighbors()/Why() returned a nil slice on zero results,
+// which encoding/json marshals as `null`, not `[]` — inconsistent with
+// mem_search/mem_candidates (backed by search()'s make([]Result, 0)).
+func TestMemRelatedReturnsEmptyArrayNotNullOnZeroNeighbors(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	idA := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"Lonely fact","body":"no links","project":"p","scope":"project"}`))
+	r := call(t, a, "mem_related", `{"id":"`+idA+`"}`)
+	if !strings.Contains(r, `"neighbors":[]`) {
+		t.Fatalf("mem_related with zero neighbors = %s, want \"neighbors\":[] not null", r)
+	}
+}
+
+func TestMemWhyReturnsEmptyArrayNotNullOnZeroEdges(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	idA := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"A","body":"a","project":"p","scope":"project"}`))
+	idB := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"B","body":"b","project":"p","scope":"project"}`))
+	r := call(t, a, "mem_why", `{"a":"`+idA+`","b":"`+idB+`"}`)
+	if !strings.Contains(r, `"edges":[]`) {
+		t.Fatalf("mem_why with zero edges = %s, want \"edges\":[] not null", r)
+	}
+}

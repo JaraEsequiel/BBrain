@@ -182,7 +182,7 @@ Package layering (`internal/`, inner → outer):
 - **`install` / `setup`** — wire BBrain into Claude Code, idempotently.
 - **`vault`** — relocate a brain (`bbrain vault move`).
 - **`watch`** — reindex on change. `bbrain mcp` now runs this reconciliation automatically for the
-  life of the session (BBRAIN-12); a hand-edit made with **no** live `bbrain mcp`/`bbrain watch`
+  life of the session (BBRAIN-12); a hand-edit made with no live `bbrain mcp`/`bbrain watch`
   session running still needs a manual `bbrain reindex` before it's searchable. Running the
   standalone `bbrain watch` command at the same time as a `bbrain mcp` session is redundant — both
   would reindex the same file independently — prefer one or the other, not both.

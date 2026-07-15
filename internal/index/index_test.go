@@ -2,6 +2,7 @@ package index
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 
 	"github.com/JaraEsequiel/BBrain/internal/fact"
@@ -493,5 +494,260 @@ func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSearchIncludesSnippetContainingTerm(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("f1", "Archive fact",
+		"This is a long body about how to archive old notes and keep the index tidy for later retrieval.",
+		"decision", "bbrain"), "/x/f1.md"))
+
+	res, err := ix.Search("archive", 10, "", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("Search(archive) = %+v, want 1 result", res)
+	}
+	if res[0].Snippet == "" {
+		t.Fatalf("Snippet is empty, want non-empty")
+	}
+	if !strings.Contains(strings.ToLower(res[0].Snippet), "archive") {
+		t.Fatalf("Snippet %q does not contain the search term", res[0].Snippet)
+	}
+}
+
+func TestSearchSnippetNeverCutsMidWord(t *testing.T) {
+	ix := openMem(t)
+	body := "This body repeats the marker word transformation many times to guarantee the " +
+		"snippet needs truncation for the query term marker across a long enough span of text " +
+		"that the token budget forces a cut somewhere before the body actually ends for real."
+	must(t, ix.IndexFact(sampleFact("f1", "Long fact", body, "decision", "bbrain"), "/x/f1.md"))
+
+	res, err := ix.Search("marker", 10, "", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("want 1 result, got %d", len(res))
+	}
+
+	bodyWords := make(map[string]bool)
+	for _, w := range strings.Fields(body) {
+		bodyWords[strings.Trim(w, ".,")] = true
+	}
+	snip := strings.TrimSuffix(res[0].Snippet, "...")
+	for _, w := range strings.Fields(snip) {
+		w = strings.Trim(w, ".,")
+		if w == "" {
+			continue
+		}
+		if !bodyWords[w] {
+			t.Fatalf("snippet %q contains %q, not a whole word from the source body — likely a mid-word cut",
+				res[0].Snippet, w)
+		}
+	}
+}
+
+func TestSearchSnippetReturnsFullShortBodyWhitespaceCollapsed(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("f1", "Short fact", "Tiny  body\n\n  here.",
+		"decision", "bbrain"), "/x/f1.md"))
+
+	res, err := ix.Search("tiny", 10, "", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("want 1 result, got %d", len(res))
+	}
+	if res[0].Snippet != "Tiny body here." {
+		t.Fatalf("Snippet = %q, want whitespace-collapsed full body %q", res[0].Snippet, "Tiny body here.")
+	}
+}
+
+func TestSearchNoMatchesReturnsEmptyNoError(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("f1", "Fact", "unrelated content",
+		"decision", "bbrain"), "/x/f1.md"))
+
+	res, err := ix.Search("nonexistentterm", 10, "", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 0 {
+		t.Fatalf("want 0 results, got %d", len(res))
+	}
+}
+
+func TestSearchAnyIncludesSnippet(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("f1", "Fact one",
+		"discusses caching strategies for the index", "decision", "bbrain"), "/x/f1.md"))
+
+	res, err := ix.SearchAny("caching strategies", 10, "", "")
+	if err != nil {
+		t.Fatalf("SearchAny: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("want 1 result, got %d", len(res))
+	}
+	if res[0].Snippet == "" {
+		t.Fatalf("Snippet is empty, want non-empty")
+	}
+}
+
+func TestNeighborsIncludesTitleAndSnippet(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("a", "Fact A",
+		"Body of fact A, reasonably long to see truncation happen for this scenario for real.",
+		"decision", "bbrain"), "/x/a.md"))
+	must(t, ix.IndexFact(sampleFact("b", "Fact B", "Body of fact B.",
+		"decision", "bbrain"), "/x/b.md"))
+	fa := sampleFact("a", "Fact A", "x", "decision", "bbrain")
+	fa.Links = []fact.Link{{Target: "[[b]]", Relation: "depends-on", Why: "needs b"}}
+	must(t, ix.IndexLinks(fa))
+
+	ns, err := ix.Neighbors("a")
+	if err != nil {
+		t.Fatalf("Neighbors: %v", err)
+	}
+	if len(ns) != 1 || ns[0].FactID != "b" {
+		t.Fatalf("Neighbors(a) = %+v, want 1 neighbor b", ns)
+	}
+	if ns[0].Title != "Fact B" {
+		t.Fatalf("Title = %q, want %q", ns[0].Title, "Fact B")
+	}
+	if ns[0].Snippet != "Body of fact B." {
+		t.Fatalf("Snippet = %q, want %q", ns[0].Snippet, "Body of fact B.")
+	}
+}
+
+// PR review finding: Neighbors()'s snippet() call reaches facts_fts via a
+// LEFT JOIN, not a MATCH-driven scan — the only officially documented FTS5
+// usage pattern for snippet(). Every prior test here used a single neighbor;
+// this proves each row of a multi-neighbor result gets its own correct,
+// non-stale title/snippet, not a copy of another row's or a cursor artifact.
+func TestNeighborsMultipleNeighborsEachGetOwnTitleAndSnippet(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("a", "Fact A", "x", "decision", "bbrain"), "/x/a.md"))
+	must(t, ix.IndexFact(sampleFact("b", "Fact B", "Body of fact B.",
+		"decision", "bbrain"), "/x/b.md"))
+	must(t, ix.IndexFact(sampleFact("c", "Fact C", "Body of fact C.",
+		"decision", "bbrain"), "/x/c.md"))
+	fa := sampleFact("a", "Fact A", "x", "decision", "bbrain")
+	fa.Links = []fact.Link{
+		{Target: "[[b]]", Relation: "depends-on", Why: "needs b"},
+		{Target: "[[c]]", Relation: "relates", Why: "also c"},
+		{Target: "[[d]]", Relation: "relates", Why: "dangling"}, // "d" never indexed
+	}
+	must(t, ix.IndexLinks(fa))
+
+	ns, err := ix.Neighbors("a")
+	if err != nil {
+		t.Fatalf("Neighbors: %v", err)
+	}
+	if len(ns) != 3 {
+		t.Fatalf("Neighbors(a) = %+v, want 3 neighbors", ns)
+	}
+	byID := make(map[string]Neighbor, len(ns))
+	for _, n := range ns {
+		byID[n.FactID] = n
+	}
+	if got := byID["b"]; got.Title != "Fact B" || got.Snippet != "Body of fact B." {
+		t.Fatalf("neighbor b = %+v, want title/snippet for Fact B", got)
+	}
+	if got := byID["c"]; got.Title != "Fact C" || got.Snippet != "Body of fact C." {
+		t.Fatalf("neighbor c = %+v, want title/snippet for Fact C", got)
+	}
+	if got := byID["d"]; got.Title != "" || got.Snippet != "" {
+		t.Fatalf("dangling neighbor d = %+v, want empty title/snippet", got)
+	}
+}
+
+func TestNeighborsDanglingLinkReturnsEmptyTitleSnippetNoError(t *testing.T) {
+	ix := openMem(t)
+	fa := sampleFact("a", "Fact A", "x", "decision", "bbrain")
+	// Link to "b" — deliberately never call IndexFact for "b": simulates a
+	// dangling link (fact deleted/archived after being linked).
+	fa.Links = []fact.Link{{Target: "[[b]]", Relation: "depends-on", Why: "needs b"}}
+	must(t, ix.IndexLinks(fa))
+
+	ns, err := ix.Neighbors("a")
+	if err != nil {
+		t.Fatalf("Neighbors: %v", err)
+	}
+	if len(ns) != 1 || ns[0].FactID != "b" {
+		t.Fatalf("Neighbors(a) = %+v, want 1 neighbor b (dangling)", ns)
+	}
+	if ns[0].Title != "" || ns[0].Snippet != "" {
+		t.Fatalf("dangling neighbor Title/Snippet = %q/%q, want both empty", ns[0].Title, ns[0].Snippet)
+	}
+}
+
+func TestWhyIncludesTitleAndSnippetForBothSides(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("a", "Fact A",
+		"Body of fact A, long enough to exercise truncation in this particular test scenario.",
+		"decision", "bbrain"), "/x/a.md"))
+	must(t, ix.IndexFact(sampleFact("b", "Fact B", "Body of fact B.",
+		"decision", "bbrain"), "/x/b.md"))
+	fa := sampleFact("a", "Fact A", "x", "decision", "bbrain")
+	fa.Links = []fact.Link{{Target: "[[b]]", Relation: "depends-on", Why: "needs b"}}
+	must(t, ix.IndexLinks(fa))
+
+	edges, err := ix.Why("a", "b")
+	if err != nil {
+		t.Fatalf("Why: %v", err)
+	}
+	if len(edges) != 1 {
+		t.Fatalf("Why(a,b) = %+v, want 1 edge", edges)
+	}
+	e := edges[0]
+	if e.SrcTitle != "Fact A" || e.DstTitle != "Fact B" {
+		t.Fatalf("titles wrong: src=%q dst=%q", e.SrcTitle, e.DstTitle)
+	}
+	if e.SrcSnippet == "" || e.DstSnippet != "Body of fact B." {
+		t.Fatalf("snippets wrong: src=%q dst=%q", e.SrcSnippet, e.DstSnippet)
+	}
+}
+
+func TestWhyDanglingSideReturnsEmptyTitleSnippetNoError(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("a", "Fact A", "Body of fact A.",
+		"decision", "bbrain"), "/x/a.md"))
+	fa := sampleFact("a", "Fact A", "x", "decision", "bbrain")
+	// "b" is never indexed via IndexFact — dangling on the dst side.
+	fa.Links = []fact.Link{{Target: "[[b]]", Relation: "depends-on", Why: "needs b"}}
+	must(t, ix.IndexLinks(fa))
+
+	edges, err := ix.Why("a", "b")
+	if err != nil {
+		t.Fatalf("Why: %v", err)
+	}
+	if len(edges) != 1 {
+		t.Fatalf("Why(a,b) = %+v, want 1 edge", edges)
+	}
+	e := edges[0]
+	if e.SrcTitle != "Fact A" {
+		t.Fatalf("SrcTitle = %q, want %q", e.SrcTitle, "Fact A")
+	}
+	if e.DstTitle != "" || e.DstSnippet != "" {
+		t.Fatalf("dangling dst Title/Snippet = %q/%q, want both empty", e.DstTitle, e.DstSnippet)
+	}
+}
+
+func TestWhyNoDirectLinkReturnsEmptyNoError(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("a", "Fact A", "x", "decision", "bbrain"), "/x/a.md"))
+	must(t, ix.IndexFact(sampleFact("b", "Fact B", "y", "decision", "bbrain"), "/x/b.md"))
+
+	edges, err := ix.Why("a", "b")
+	if err != nil {
+		t.Fatalf("Why: %v", err)
+	}
+	if len(edges) != 0 {
+		t.Fatalf("Why(a,b) with no link = %+v, want empty", edges)
 	}
 }

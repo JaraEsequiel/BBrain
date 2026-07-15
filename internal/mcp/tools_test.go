@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -199,8 +200,14 @@ func TestMemRelatedToleratesArchivedNeighbor(t *testing.T) {
 	ix.Close()
 
 	// The A→B edge is now dangling in `links` — mem_related must still return it.
-	if r := call(t, a, "mem_related", `{"id":"`+idA+`"}`); !strings.Contains(r, idB) {
+	r := call(t, a, "mem_related", `{"id":"`+idA+`"}`)
+	if !strings.Contains(r, idB) {
 		t.Fatalf("mem_related should keep the edge to the archived fact %s, got: %s", idB, r)
+	}
+	// BBRAIN-10 AC-5: the dangling neighbor's title/snippet must be empty, not
+	// absent or erroring — and the old (now-stale) title must not leak through.
+	if strings.Contains(r, "Session storage") {
+		t.Fatalf("mem_related leaked the archived fact's stale title: %s", r)
 	}
 }
 
@@ -536,5 +543,91 @@ func TestMemSaveSurfacesRelatedCandidates(t *testing.T) {
 	outC := call(t, a, "mem_save", `{"type":"decision","title":"Frontend teal palette","body":"pick teal accents","project":"p"}`)
 	if strings.Contains(outC, `"related"`) {
 		t.Fatalf("C is dissimilar; should have no related:\n%s", outC)
+	}
+}
+
+func TestMemSearchIncludesSnippet(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	call(t, a, "mem_save", `{"type":"decision","title":"JWT thing","body":"stateless tokens for authentication","project":"p","scope":"project"}`)
+	sr := call(t, a, "mem_search", `{"query":"stateless"}`)
+	if !strings.Contains(sr, `"snippet"`) {
+		t.Fatalf("mem_search result missing snippet key: %s", sr)
+	}
+}
+
+func TestMemCandidatesIncludesSnippet(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	id1 := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"Cache design","body":"discusses caching strategies for the index","project":"p","scope":"project"}`))
+	call(t, a, "mem_save", `{"type":"decision","title":"Cache follow-up","body":"more caching strategies notes","project":"p","scope":"project"}`)
+	cr := call(t, a, "mem_candidates", fmt.Sprintf(`{"id":%q}`, id1))
+	if !strings.Contains(cr, `"snippet"`) {
+		t.Fatalf("mem_candidates result missing snippet key: %s", cr)
+	}
+}
+
+func TestMemRelatedIncludesTitleAndSnippet(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	idA := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"Auth model","body":"jwt","project":"p","scope":"project"}`))
+	idB := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"Session storage","body":"redis backed sessions","project":"p","scope":"project"}`))
+	call(t, a, "mem_link", `{"from":"`+idA+`","to":"`+idB+`","relation":"depends-on","why":"auth needs sessions"}`)
+
+	r := call(t, a, "mem_related", `{"id":"`+idA+`"}`)
+	if !strings.Contains(r, `"title":"Session storage"`) {
+		t.Fatalf("mem_related missing neighbor title: %s", r)
+	}
+	if !strings.Contains(r, `"snippet"`) {
+		t.Fatalf("mem_related missing snippet key: %s", r)
+	}
+}
+
+func TestMemWhyIncludesTitleAndSnippet(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	idA := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"Auth model","body":"jwt","project":"p","scope":"project"}`))
+	idB := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"Session storage","body":"redis backed sessions","project":"p","scope":"project"}`))
+	call(t, a, "mem_link", `{"from":"`+idA+`","to":"`+idB+`","relation":"depends-on","why":"auth needs sessions"}`)
+
+	r := call(t, a, "mem_why", `{"a":"`+idA+`","b":"`+idB+`"}`)
+	if !strings.Contains(r, `"src_title":"Auth model"`) || !strings.Contains(r, `"dst_title":"Session storage"`) {
+		t.Fatalf("mem_why missing src/dst titles: %s", r)
+	}
+}
+
+// s10 review finding: Neighbors()/Why() returned a nil slice on zero results,
+// which encoding/json marshals as `null`, not `[]` — inconsistent with
+// mem_search/mem_candidates (backed by search()'s make([]Result, 0)).
+func TestMemRelatedReturnsEmptyArrayNotNullOnZeroNeighbors(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	idA := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"Lonely fact","body":"no links","project":"p","scope":"project"}`))
+	r := call(t, a, "mem_related", `{"id":"`+idA+`"}`)
+	if !strings.Contains(r, `"neighbors":[]`) {
+		t.Fatalf("mem_related with zero neighbors = %s, want \"neighbors\":[] not null", r)
+	}
+}
+
+func TestMemWhyReturnsEmptyArrayNotNullOnZeroEdges(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	idA := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"A","body":"a","project":"p","scope":"project"}`))
+	idB := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"B","body":"b","project":"p","scope":"project"}`))
+	r := call(t, a, "mem_why", `{"a":"`+idA+`","b":"`+idB+`"}`)
+	if !strings.Contains(r, `"edges":[]`) {
+		t.Fatalf("mem_why with zero edges = %s, want \"edges\":[] not null", r)
 	}
 }

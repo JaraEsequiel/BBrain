@@ -25,6 +25,19 @@ type Index struct {
 // on-disk index (see isStale).
 const indexSchemaVersion = 1
 
+// snippetTokens is the FTS5 snippet() token budget approximating the ~160-char
+// preview cap. ponytail: tuned by eye against real fact bodies during design;
+// adjust here if previews read too short/long in practice — no other code depends on the exact
+// value.
+const snippetTokens = 28
+
+// collapseWhitespace normalizes the FTS5 snippet() builtin's output, which
+// preserves the source body's raw whitespace/newlines verbatim rather than
+// collapsing them.
+func collapseWhitespace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
 // schema: a single standalone FTS5 table. Searchable columns (title, body, tags,
 // topic_key) are tokenized; identifiers/filters (fact_id, path, type, scope,
 // project) are UNINDEXED so they are stored verbatim and usable in WHERE.
@@ -176,10 +189,14 @@ func (ix *Index) IndexLinks(f fact.Fact) error {
 
 // Edge is one reasoned graph edge.
 type Edge struct {
-	SrcID    string `json:"src_id"`
-	DstID    string `json:"dst_id"`
-	Relation string `json:"relation"`
-	Why      string `json:"why"`
+	SrcID      string `json:"src_id"`
+	DstID      string `json:"dst_id"`
+	Relation   string `json:"relation"`
+	Why        string `json:"why"`
+	SrcTitle   string `json:"src_title"`
+	SrcSnippet string `json:"src_snippet"`
+	DstTitle   string `json:"dst_title"`
+	DstSnippet string `json:"dst_snippet"`
 }
 
 // Neighbor is a fact connected to a given fact, with the relation, its why, and
@@ -190,6 +207,31 @@ type Neighbor struct {
 	Relation  string `json:"relation"`
 	Why       string `json:"why"`
 	Direction string `json:"direction"`
+	Title     string `json:"title"`
+	Snippet   string `json:"snippet"`
+}
+
+// factPreview resolves a fact's title and body snippet by id, reusing the same
+// FTS5 snippet() technique as search() and Neighbors(). A fact_id with no
+// matching row (e.g. a dangling link to a deleted/archived fact) resolves to
+// empty strings, not an error.
+//
+// ponytail: Why() needs both sides of an edge in one row, but joining facts_fts
+// twice under two aliases and calling snippet() on an alias fails at the driver
+// level (spiked: "no such column: <alias>"). Two lookups is the smallest fix —
+// Why() only ever resolves two specific facts, so the extra round-trip is free
+// in practice; revisit only if Why() ever needs to resolve many edges at once.
+func (ix *Index) factPreview(id string) (title, snippet string, err error) {
+	row := ix.db.QueryRow(
+		`SELECT title, snippet(facts_fts, 3, '', '', '...', ?) FROM facts_fts WHERE fact_id = ?`,
+		snippetTokens, id)
+	if err := row.Scan(&title, &snippet); err != nil {
+		if err == sql.ErrNoRows {
+			return "", "", nil
+		}
+		return "", "", err
+	}
+	return title, collapseWhitespace(snippet), nil
 }
 
 // Why returns the reasoned edges directly connecting a and b, in either direction
@@ -204,7 +246,7 @@ func (ix *Index) Why(aID, bID string) ([]Edge, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Edge
+	out := make([]Edge, 0)
 	for rows.Next() {
 		var e Edge
 		if err := rows.Scan(&e.SrcID, &e.DstID, &e.Relation, &e.Why); err != nil {
@@ -212,7 +254,18 @@ func (ix *Index) Why(aID, bID string) ([]Edge, error) {
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if out[i].SrcTitle, out[i].SrcSnippet, err = ix.factPreview(out[i].SrcID); err != nil {
+			return nil, err
+		}
+		if out[i].DstTitle, out[i].DstSnippet, err = ix.factPreview(out[i].DstID); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // Neighbors returns every fact linked to or from id, with direction. Out-edges
@@ -220,21 +273,29 @@ func (ix *Index) Why(aID, bID string) ([]Edge, error) {
 // id for deterministic output.
 func (ix *Index) Neighbors(id string) ([]Neighbor, error) {
 	rows, err := ix.db.Query(
-		`SELECT dst_id, relation, why, 'out' AS dir FROM links WHERE src_id = ?
-		 UNION ALL
-		 SELECT src_id, relation, why, 'in' AS dir FROM links WHERE dst_id = ?
-		 ORDER BY 4, 1`,
-		id, id)
+		`SELECT n.fact_id, n.relation, n.why, n.dir, f.title,
+		        CASE WHEN f.fact_id IS NOT NULL THEN snippet(facts_fts, 3, '', '', '...', ?) ELSE '' END
+		 FROM (
+		     SELECT dst_id AS fact_id, relation, why, 'out' AS dir FROM links WHERE src_id = ?
+		     UNION ALL
+		     SELECT src_id AS fact_id, relation, why, 'in' AS dir FROM links WHERE dst_id = ?
+		 ) n
+		 LEFT JOIN facts_fts f ON f.fact_id = n.fact_id
+		 ORDER BY n.dir, n.fact_id`,
+		snippetTokens, id, id)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Neighbor
+	out := make([]Neighbor, 0)
 	for rows.Next() {
 		var n Neighbor
-		if err := rows.Scan(&n.FactID, &n.Relation, &n.Why, &n.Direction); err != nil {
+		var title sql.NullString
+		if err := rows.Scan(&n.FactID, &n.Relation, &n.Why, &n.Direction, &title, &n.Snippet); err != nil {
 			return nil, err
 		}
+		n.Title = title.String
+		n.Snippet = collapseWhitespace(n.Snippet)
 		out = append(out, n)
 	}
 	return out, rows.Err()
@@ -274,6 +335,7 @@ type Result struct {
 	Type    string `json:"type"`
 	Project string `json:"project"`
 	Path    string `json:"path"`
+	Snippet string `json:"snippet"`
 }
 
 // Search runs an FTS5 MATCH over title/body/tags/topic_key (all query terms
@@ -294,10 +356,10 @@ func (ix *Index) search(match string, limit int, project, typ string) ([]Result,
 	if match == "" {
 		return []Result{}, nil
 	}
-	q := `SELECT fact_id, title, type, project, path
+	q := `SELECT fact_id, title, type, project, path, snippet(facts_fts, 3, '', '', '...', ?)
 	      FROM facts_fts
 	      WHERE facts_fts MATCH ?`
-	args := []any{match}
+	args := []any{snippetTokens, match}
 	if project != "" {
 		q += ` AND project = ?`
 		args = append(args, project)
@@ -318,9 +380,10 @@ func (ix *Index) search(match string, limit int, project, typ string) ([]Result,
 	out := make([]Result, 0)
 	for rows.Next() {
 		var r Result
-		if err := rows.Scan(&r.FactID, &r.Title, &r.Type, &r.Project, &r.Path); err != nil {
+		if err := rows.Scan(&r.FactID, &r.Title, &r.Type, &r.Project, &r.Path, &r.Snippet); err != nil {
 			return nil, err
 		}
+		r.Snippet = collapseWhitespace(r.Snippet)
 		out = append(out, r)
 	}
 	return out, rows.Err()

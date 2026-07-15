@@ -643,3 +643,69 @@ func TestNeighborsDanglingLinkReturnsEmptyTitleSnippetNoError(t *testing.T) {
 		t.Fatalf("dangling neighbor Title/Snippet = %q/%q, want both empty", ns[0].Title, ns[0].Snippet)
 	}
 }
+
+func TestWhyIncludesTitleAndSnippetForBothSides(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("a", "Fact A",
+		"Body of fact A, long enough to exercise truncation in this particular test scenario.",
+		"decision", "bbrain"), "/x/a.md"))
+	must(t, ix.IndexFact(sampleFact("b", "Fact B", "Body of fact B.",
+		"decision", "bbrain"), "/x/b.md"))
+	fa := sampleFact("a", "Fact A", "x", "decision", "bbrain")
+	fa.Links = []fact.Link{{Target: "[[b]]", Relation: "depends-on", Why: "needs b"}}
+	must(t, ix.IndexLinks(fa))
+
+	edges, err := ix.Why("a", "b")
+	if err != nil {
+		t.Fatalf("Why: %v", err)
+	}
+	if len(edges) != 1 {
+		t.Fatalf("Why(a,b) = %+v, want 1 edge", edges)
+	}
+	e := edges[0]
+	if e.SrcTitle != "Fact A" || e.DstTitle != "Fact B" {
+		t.Fatalf("titles wrong: src=%q dst=%q", e.SrcTitle, e.DstTitle)
+	}
+	if e.SrcSnippet == "" || e.DstSnippet != "Body of fact B." {
+		t.Fatalf("snippets wrong: src=%q dst=%q", e.SrcSnippet, e.DstSnippet)
+	}
+}
+
+func TestWhyDanglingSideReturnsEmptyTitleSnippetNoError(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("a", "Fact A", "Body of fact A.",
+		"decision", "bbrain"), "/x/a.md"))
+	fa := sampleFact("a", "Fact A", "x", "decision", "bbrain")
+	// "b" is never indexed via IndexFact — dangling on the dst side.
+	fa.Links = []fact.Link{{Target: "[[b]]", Relation: "depends-on", Why: "needs b"}}
+	must(t, ix.IndexLinks(fa))
+
+	edges, err := ix.Why("a", "b")
+	if err != nil {
+		t.Fatalf("Why: %v", err)
+	}
+	if len(edges) != 1 {
+		t.Fatalf("Why(a,b) = %+v, want 1 edge", edges)
+	}
+	e := edges[0]
+	if e.SrcTitle != "Fact A" {
+		t.Fatalf("SrcTitle = %q, want %q", e.SrcTitle, "Fact A")
+	}
+	if e.DstTitle != "" || e.DstSnippet != "" {
+		t.Fatalf("dangling dst Title/Snippet = %q/%q, want both empty", e.DstTitle, e.DstSnippet)
+	}
+}
+
+func TestWhyNoDirectLinkReturnsEmptyNoError(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("a", "Fact A", "x", "decision", "bbrain"), "/x/a.md"))
+	must(t, ix.IndexFact(sampleFact("b", "Fact B", "y", "decision", "bbrain"), "/x/b.md"))
+
+	edges, err := ix.Why("a", "b")
+	if err != nil {
+		t.Fatalf("Why: %v", err)
+	}
+	if len(edges) != 0 {
+		t.Fatalf("Why(a,b) with no link = %+v, want empty", edges)
+	}
+}

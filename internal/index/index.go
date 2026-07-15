@@ -182,10 +182,14 @@ func (ix *Index) IndexLinks(f fact.Fact) error {
 
 // Edge is one reasoned graph edge.
 type Edge struct {
-	SrcID    string `json:"src_id"`
-	DstID    string `json:"dst_id"`
-	Relation string `json:"relation"`
-	Why      string `json:"why"`
+	SrcID      string `json:"src_id"`
+	DstID      string `json:"dst_id"`
+	Relation   string `json:"relation"`
+	Why        string `json:"why"`
+	SrcTitle   string `json:"src_title"`
+	SrcSnippet string `json:"src_snippet"`
+	DstTitle   string `json:"dst_title"`
+	DstSnippet string `json:"dst_snippet"`
 }
 
 // Neighbor is a fact connected to a given fact, with the relation, its why, and
@@ -198,6 +202,29 @@ type Neighbor struct {
 	Direction string `json:"direction"`
 	Title     string `json:"title"`
 	Snippet   string `json:"snippet"`
+}
+
+// factPreview resolves a fact's title and body snippet by id, reusing the same
+// FTS5 snippet() technique as search() and Neighbors(). A fact_id with no
+// matching row (e.g. a dangling link to a deleted/archived fact) resolves to
+// empty strings, not an error.
+//
+// ponytail: Why() needs both sides of an edge in one row, but joining facts_fts
+// twice under two aliases and calling snippet() on an alias fails at the driver
+// level (spiked: "no such column: <alias>"). Two lookups is the smallest fix —
+// Why() only ever resolves two specific facts, so the extra round-trip is free
+// in practice; revisit only if Why() ever needs to resolve many edges at once.
+func (ix *Index) factPreview(id string) (title, snippet string, err error) {
+	row := ix.db.QueryRow(
+		`SELECT title, snippet(facts_fts, 3, '', '', '...', ?) FROM facts_fts WHERE fact_id = ?`,
+		snippetTokens, id)
+	if err := row.Scan(&title, &snippet); err != nil {
+		if err == sql.ErrNoRows {
+			return "", "", nil
+		}
+		return "", "", err
+	}
+	return title, strings.Join(strings.Fields(snippet), " "), nil
 }
 
 // Why returns the reasoned edges directly connecting a and b, in either direction
@@ -220,7 +247,18 @@ func (ix *Index) Why(aID, bID string) ([]Edge, error) {
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if out[i].SrcTitle, out[i].SrcSnippet, err = ix.factPreview(out[i].SrcID); err != nil {
+			return nil, err
+		}
+		if out[i].DstTitle, out[i].DstSnippet, err = ix.factPreview(out[i].DstID); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // Neighbors returns every fact linked to or from id, with direction. Out-edges

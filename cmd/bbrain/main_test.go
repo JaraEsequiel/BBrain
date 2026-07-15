@@ -2,13 +2,11 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestRunVersion(t *testing.T) {
@@ -1007,78 +1005,8 @@ func TestReorderFlagsFirstDoesNotConsumeFlagsAsValues(t *testing.T) {
 	}
 }
 
-// TestEndToEndMCPPicksUpHandEditedFact drives a real `bbrain mcp` session via
-// io.Pipe so a hand-edit can happen mid-session between requests, and asserts
-// a later mem_search/mem_get reflects it without any manual command — the
-// background reindex loop (D1) wired into cmdMCP.
-func TestEndToEndMCPPicksUpHandEditedFact(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("BBRAIN_HOME", home)
-	var initOut, initErr bytes.Buffer
-	if code := run([]string{"init"}, &initOut, &initErr); code != 0 {
-		t.Fatalf("init: %s", initErr.String())
-	}
-
-	pr, pw := io.Pipe()
-	var mcpOut, mcpErr bytes.Buffer
-	done := make(chan int, 1)
-	go func() {
-		done <- runWithIn([]string{"mcp"}, pr, &mcpOut, &mcpErr)
-	}()
-
-	write := func(line string) {
-		if _, err := io.WriteString(pw, line+"\n"); err != nil {
-			t.Fatalf("write stdin: %v", err)
-		}
-	}
-	write(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
-	write(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
-	write(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mem_save","arguments":{"type":"note","title":"before","body":"before body","project":"e2e","scope":"project"}}}`)
-	time.Sleep(200 * time.Millisecond)
-
-	factsDir := filepath.Join(home, "raws", "facts")
-	entries, err := os.ReadDir(factsDir)
-	if err != nil || len(entries) == 0 {
-		t.Fatalf("expected a saved fact file, dir read err=%v entries=%d", err, len(entries))
-	}
-	factPath := filepath.Join(factsDir, entries[0].Name())
-	body, err := os.ReadFile(factPath)
-	if err != nil {
-		t.Fatalf("read fact: %v", err)
-	}
-	edited := strings.Replace(string(body), "before body", "handedited-marker body", 1)
-	if err := os.WriteFile(factPath, []byte(edited), 0o644); err != nil {
-		t.Fatalf("hand-edit fact: %v", err)
-	}
-	time.Sleep(2500 * time.Millisecond) // > cmdMCP's fixed 2s reindex interval
-
-	write(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mem_search","arguments":{"query":"handedited-marker"}}}`)
-
-	entries2, err := os.ReadDir(factsDir)
-	if err != nil || len(entries2) == 0 {
-		t.Fatalf("expected the fact file to still be there for mem_get: err=%v entries=%d", err, len(entries2))
-	}
-	factID := strings.TrimSuffix(entries2[0].Name(), ".md")
-	write(fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"mem_get","arguments":{"id":%q}}}`, factID))
-	pw.Close()
-
-	select {
-	case code := <-done:
-		if code != 0 {
-			t.Fatalf("mcp exit=%d err=%s", code, mcpErr.String())
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("AC-1: mcp process did not exit after stdin EOF — background loop may have leaked")
-	}
-
-	lines := strings.Split(strings.TrimSpace(mcpOut.String()), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("want 4 responses, got %d:\n%s", len(lines), mcpOut.String())
-	}
-	if !strings.Contains(lines[2], "handedited-marker") {
-		t.Fatalf("AC-1 TC-1.1: mem_search did not reflect hand-edited fact: %s", lines[2])
-	}
-	if !strings.Contains(lines[3], "handedited-marker") {
-		t.Fatalf("TC-1.3/D4: mem_get did not reflect hand-edited fact: %s", lines[3])
-	}
-}
+// AC-1 end-to-end coverage (hand-edited fact reflected via mem_search/mem_get, no
+// goroutine leak on stdin EOF) lives in the already-committed acceptance test
+// TestAcceptance_AC1_HandEditedFactReflectedInMemSearchViaLiveMCPSession
+// (cmd/bbrain/acceptance_bbrain12_test.go) — that test exercises the exact same
+// scenario against this same cmdMCP wiring, so it is not duplicated here.

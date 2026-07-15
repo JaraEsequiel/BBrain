@@ -597,3 +597,49 @@ func TestSearchAnyIncludesSnippet(t *testing.T) {
 		t.Fatalf("Snippet is empty, want non-empty")
 	}
 }
+
+func TestNeighborsIncludesTitleAndSnippet(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("a", "Fact A",
+		"Body of fact A, reasonably long to see truncation happen for this scenario for real.",
+		"decision", "bbrain"), "/x/a.md"))
+	must(t, ix.IndexFact(sampleFact("b", "Fact B", "Body of fact B.",
+		"decision", "bbrain"), "/x/b.md"))
+	fa := sampleFact("a", "Fact A", "x", "decision", "bbrain")
+	fa.Links = []fact.Link{{Target: "[[b]]", Relation: "depends-on", Why: "needs b"}}
+	must(t, ix.IndexLinks(fa))
+
+	ns, err := ix.Neighbors("a")
+	if err != nil {
+		t.Fatalf("Neighbors: %v", err)
+	}
+	if len(ns) != 1 || ns[0].FactID != "b" {
+		t.Fatalf("Neighbors(a) = %+v, want 1 neighbor b", ns)
+	}
+	if ns[0].Title != "Fact B" {
+		t.Fatalf("Title = %q, want %q", ns[0].Title, "Fact B")
+	}
+	if ns[0].Snippet != "Body of fact B." {
+		t.Fatalf("Snippet = %q, want %q", ns[0].Snippet, "Body of fact B.")
+	}
+}
+
+func TestNeighborsDanglingLinkReturnsEmptyTitleSnippetNoError(t *testing.T) {
+	ix := openMem(t)
+	fa := sampleFact("a", "Fact A", "x", "decision", "bbrain")
+	// Link to "b" — deliberately never call IndexFact for "b": simulates a
+	// dangling link (fact deleted/archived after being linked).
+	fa.Links = []fact.Link{{Target: "[[b]]", Relation: "depends-on", Why: "needs b"}}
+	must(t, ix.IndexLinks(fa))
+
+	ns, err := ix.Neighbors("a")
+	if err != nil {
+		t.Fatalf("Neighbors: %v", err)
+	}
+	if len(ns) != 1 || ns[0].FactID != "b" {
+		t.Fatalf("Neighbors(a) = %+v, want 1 neighbor b (dangling)", ns)
+	}
+	if ns[0].Title != "" || ns[0].Snippet != "" {
+		t.Fatalf("dangling neighbor Title/Snippet = %q/%q, want both empty", ns[0].Title, ns[0].Snippet)
+	}
+}

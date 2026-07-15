@@ -196,6 +196,8 @@ type Neighbor struct {
 	Relation  string `json:"relation"`
 	Why       string `json:"why"`
 	Direction string `json:"direction"`
+	Title     string `json:"title"`
+	Snippet   string `json:"snippet"`
 }
 
 // Why returns the reasoned edges directly connecting a and b, in either direction
@@ -226,11 +228,16 @@ func (ix *Index) Why(aID, bID string) ([]Edge, error) {
 // id for deterministic output.
 func (ix *Index) Neighbors(id string) ([]Neighbor, error) {
 	rows, err := ix.db.Query(
-		`SELECT dst_id, relation, why, 'out' AS dir FROM links WHERE src_id = ?
-		 UNION ALL
-		 SELECT src_id, relation, why, 'in' AS dir FROM links WHERE dst_id = ?
-		 ORDER BY 4, 1`,
-		id, id)
+		`SELECT n.fact_id, n.relation, n.why, n.dir, f.title,
+		        CASE WHEN f.fact_id IS NOT NULL THEN snippet(facts_fts, 3, '', '', '...', ?) ELSE '' END
+		 FROM (
+		     SELECT dst_id AS fact_id, relation, why, 'out' AS dir FROM links WHERE src_id = ?
+		     UNION ALL
+		     SELECT src_id AS fact_id, relation, why, 'in' AS dir FROM links WHERE dst_id = ?
+		 ) n
+		 LEFT JOIN facts_fts f ON f.fact_id = n.fact_id
+		 ORDER BY n.dir, n.fact_id`,
+		snippetTokens, id, id)
 	if err != nil {
 		return nil, err
 	}
@@ -238,9 +245,12 @@ func (ix *Index) Neighbors(id string) ([]Neighbor, error) {
 	var out []Neighbor
 	for rows.Next() {
 		var n Neighbor
-		if err := rows.Scan(&n.FactID, &n.Relation, &n.Why, &n.Direction); err != nil {
+		var title sql.NullString
+		if err := rows.Scan(&n.FactID, &n.Relation, &n.Why, &n.Direction, &title, &n.Snippet); err != nil {
 			return nil, err
 		}
+		n.Title = title.String
+		n.Snippet = strings.Join(strings.Fields(n.Snippet), " ")
 		out = append(out, n)
 	}
 	return out, rows.Err()

@@ -53,4 +53,4 @@ Accepted — branch-gate-reviewer (autonomous), 2026-07-15T00:00:00Z. Both remai
 pure style/clarity, no correctness defect, no AC left partial, suite green.
 
 ## PR
-(filled in after Step 7)
+https://github.com/JaraEsequiel/BBrain/pull/34

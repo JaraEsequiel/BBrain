@@ -2,13 +2,14 @@
 key: BBRAIN-10
 type: Story
 title: "Graph: Add title+snippet to mem_related/mem_why"
-status: todo
+status: in-review
 parent: BBRAIN-8
 area: search
 labels: [index, mcp]
 points: 5
+pr: https://github.com/JaraEsequiel/BBrain/pull/34
 created: 2026-07-15T03:17:02Z
-updated: 2026-07-15T03:17:02Z
+updated: 2026-07-15T05:46:42Z
 reviewed_by: ticket-reviewer (autonomous), 2026-07-15
 ---
 

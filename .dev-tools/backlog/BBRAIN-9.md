@@ -2,13 +2,14 @@
 key: BBRAIN-9
 type: Story
 title: "Search: Add snippet field to mem_search results"
-status: todo
+status: in-review
 parent: BBRAIN-8
 area: search
 labels: [index, mcp]
 points: 3
+pr: https://github.com/JaraEsequiel/BBrain/pull/34
 created: 2026-07-15T03:17:02Z
-updated: 2026-07-15T03:17:02Z
+updated: 2026-07-15T05:46:42Z
 reviewed_by: ticket-reviewer (autonomous), 2026-07-15
 ---
 

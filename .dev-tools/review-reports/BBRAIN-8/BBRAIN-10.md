@@ -49,4 +49,4 @@ BBRAIN-9's diff but touching shared file `internal/index/index.go`/`acceptance_b
 classified ACCEPTABLE — pure style/clarity, no correctness defect, no AC left partial, suite green.
 
 ## PR
-(filled in after Step 7)
+https://github.com/JaraEsequiel/BBrain/pull/34

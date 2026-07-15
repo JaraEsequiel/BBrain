@@ -698,8 +698,13 @@ func cmdMCP(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if _, err := os.Stat(a.Brain.FactsDir()); os.IsNotExist(err) {
 		fmt.Fprintf(stderr, "mcp: warning: no brain at %q (facts dir missing); tools will return empty until --home/BBRAIN_HOME points at a real brain or `bbrain init` runs there\n", root)
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go mcp.RunBackgroundReindex(ctx, a, a.Brain.FactsDir(), 2*time.Second)
+
 	srv := &mcp.Server{App: a, Tools: mcp.DefaultTools()}
-	if err := srv.Serve(context.Background(), stdin, stdout); err != nil {
+	if err := srv.Serve(ctx, stdin, stdout); err != nil {
 		fmt.Fprintf(stderr, "mcp: %v\n", err)
 		return 1
 	}

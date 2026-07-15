@@ -2,11 +2,11 @@
 key: BBRAIN-6
 type: Epic
 title: "MCP: Archive/unarchive con guardrail de visibilidad"
-status: todo
+status: in-progress
 area: mcp
 labels: [mcp, backend]
 created: 2026-07-14T23:12:57Z
-updated: 2026-07-14T23:12:57Z
+updated: 2026-07-15T00:30:06Z
 reviewed_by: ticket-reviewer (autonomous), 2026-07-14
 ---
 

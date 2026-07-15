@@ -2,13 +2,14 @@
 key: BBRAIN-7
 type: Story
 title: "MCP: Expose mem_archive/mem_unarchive with id-only guardrail"
-status: todo
+status: in-review
+pr: https://github.com/JaraEsequiel/BBrain/pull/33
 parent: BBRAIN-6
 area: mcp
 labels: [mcp, backend, test]
 points: 3
 created: 2026-07-14T23:17:52Z
-updated: 2026-07-14T23:17:52Z
+updated: 2026-07-15T00:30:06Z
 reviewed_by: ticket-reviewer (autonomous), 2026-07-14
 ---
 

@@ -20,6 +20,7 @@ func DefaultTools() []Tool {
 		{Name: "mem_get", Description: "Fetch one memory by id.", InputSchema: schemaID, Handler: handleMemGet},
 		{Name: "mem_delete", Description: "Delete a memory by id.", InputSchema: schemaID, Handler: handleMemDelete},
 		{Name: "mem_archive", Description: "Archive facts by explicit id (batch). Only in response to explicit user intent (\"archive that\", \"remove that from search\") — never autonomous housekeeping, never bulk-by-filter.", InputSchema: schemaIDs, Handler: handleMemArchive},
+		{Name: "mem_unarchive", Description: "Unarchive facts by explicit id (batch). Only in response to explicit user intent — never autonomous housekeeping, never bulk-by-filter.", InputSchema: schemaIDs, Handler: handleMemUnarchive},
 		{Name: "mem_link", Description: "Add a reasoned typed link between two memories.", InputSchema: schemaMemLink, Handler: handleMemLink},
 		{Name: "mem_why", Description: "Explain how two memories are directly related.", InputSchema: schemaMemWhy, Handler: handleMemWhy},
 		{Name: "mem_related", Description: "List memories linked to/from a memory.", InputSchema: schemaID, Handler: handleMemRelated},
@@ -195,6 +196,23 @@ func handleMemArchive(ctx context.Context, a *app.App, raw json.RawMessage) (any
 		archived = append(archived, id)
 	}
 	return map[string]any{"ids": archived, "count": len(archived)}, nil
+}
+
+func handleMemUnarchive(ctx context.Context, a *app.App, raw json.RawMessage) (any, error) {
+	var in struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return nil, err
+	}
+	unarchived := make([]string, 0, len(in.IDs))
+	for _, id := range in.IDs {
+		if _, err := a.Unarchive(id); err != nil {
+			continue
+		}
+		unarchived = append(unarchived, id)
+	}
+	return map[string]any{"ids": unarchived, "count": len(unarchived)}, nil
 }
 
 func handleMemLink(ctx context.Context, a *app.App, raw json.RawMessage) (any, error) {

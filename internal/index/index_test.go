@@ -755,7 +755,13 @@ func TestWhyNoDirectLinkReturnsEmptyNoError(t *testing.T) {
 
 // AC-2/D3: RebuildAll rebuilds the whole index in a single transaction — a
 // failure partway through must roll back the entire rebuild, leaving the
-// prior on-disk index untouched.
+// prior on-disk index untouched. This forces a genuine mid-transaction
+// failure (not merely a Begin() failure) by holding a competing write lock
+// on the same on-disk file from a second connection: with no busy_timeout
+// configured (confirmed elsewhere — the index layer opens sql.Open with no
+// DSN params), RebuildAll's own resetTx statement hits SQLITE_BUSY only
+// after its own Begin() has already succeeded, genuinely exercising
+// tx.Rollback() rather than failing before any transaction was opened.
 func TestRebuildAllRollsBackOnFailure(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "index.db")
@@ -763,25 +769,31 @@ func TestRebuildAllRollsBackOnFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
+	defer ix.Close()
 	before := fact.Fact{ID: "f1", Title: "before", Body: "before body", Type: "note"}
 	if err := ix.IndexFact(before, "f1.md"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
-	if err := ix.Close(); err != nil {
-		t.Fatalf("close: %v", err)
+	blocker, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open blocker: %v", err)
 	}
-	after := fact.Fact{ID: "f2", Title: "after", Body: "after body", Type: "note"}
-	if err := ix.RebuildAll([]fact.Fact{after}, func(f fact.Fact) string { return f.ID + ".md" }); err == nil {
-		t.Fatal("expected RebuildAll to fail on a closed index handle")
+	defer blocker.Close()
+	if _, err := blocker.Exec("BEGIN IMMEDIATE"); err != nil {
+		t.Fatalf("blocker BEGIN IMMEDIATE: %v", err)
 	}
 
-	reopened, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
+	after := fact.Fact{ID: "f2", Title: "after", Body: "after body", Type: "note"}
+	if err := ix.RebuildAll([]fact.Fact{after}, func(f fact.Fact) string { return f.ID + ".md" }); err == nil {
+		t.Fatal("expected RebuildAll to fail while a competing writer holds the lock")
 	}
-	defer reopened.Close()
-	res, err := reopened.SearchAny("before", 10, "", "")
+
+	if _, err := blocker.Exec("ROLLBACK"); err != nil {
+		t.Fatalf("blocker ROLLBACK: %v", err)
+	}
+
+	res, err := ix.SearchAny("before", 10, "", "")
 	if err != nil {
 		t.Fatalf("search after failed rebuild: %v", err)
 	}

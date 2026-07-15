@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1173,5 +1175,40 @@ func TestSearchFlagsStaleIndex(t *testing.T) {
 	}
 	if !stale {
 		t.Fatalf("Search() stale = false, want true against a pre-porter on-disk index")
+	}
+}
+
+func TestConcurrentReindexAndSaveDoNotRace(t *testing.T) {
+	a := New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := a.Save(store.SaveInput{Type: "note", Title: "seed", Body: "seed body"}); err != nil {
+		t.Fatalf("seed save: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	errs := make(chan error, 2)
+	go func() {
+		defer wg.Done()
+		if _, err := a.Reindex(); err != nil {
+			errs <- fmt.Errorf("reindex: %w", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if _, err := a.Save(store.SaveInput{Type: "note", Title: "concurrent", Body: "concurrent body"}); err != nil {
+			errs <- fmt.Errorf("save: %w", err)
+		}
+	}()
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("AC-2: %v", err)
+	}
+
+	if _, stale, err := a.Search("concurrent", 10, "", ""); err != nil || stale {
+		t.Errorf("AC-2: post-race search failed or stale: stale=%v err=%v", stale, err)
 	}
 }

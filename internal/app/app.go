@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/JaraEsequiel/BBrain/internal/brain"
@@ -26,6 +27,9 @@ type App struct {
 	Store  *store.Store
 	Brain  brain.Brain
 	Runner llm.Runner
+
+	mu sync.Mutex // ponytail: global lock serializes all index access; per-operation locking if
+	// throughput ever measurably suffers — see BBRAIN-12
 }
 
 // New builds an App rooted at a brain directory.
@@ -40,6 +44,20 @@ func New(root string) *App {
 // index can be opened for writing even on a freshly cleaned brain.
 func (a *App) ensureIndexDir() error {
 	return os.MkdirAll(filepath.Dir(a.Brain.IndexPath()), 0755)
+}
+
+// withIndex opens the derived index, runs fn against it, and closes it — all
+// under a.mu, so concurrent index-touching operations serialize instead of
+// racing on the underlying SQLite file.
+func (a *App) withIndex(fn func(*index.Index) error) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	ix, err := index.Open(a.Brain.IndexPath())
+	if err != nil {
+		return err
+	}
+	defer ix.Close()
+	return fn(ix)
 }
 
 // Init creates the brain structure and builds an initial (empty) index.
@@ -61,23 +79,23 @@ func (a *App) Reindex() (int, error) {
 	if err := a.ensureIndexDir(); err != nil {
 		return 0, err
 	}
-	ix, err := index.Open(a.Brain.IndexPath())
-	if err != nil {
-		return 0, err
-	}
-	defer ix.Close()
-	if err := ix.Reset(); err != nil {
-		return 0, err
-	}
-	for _, f := range facts {
-		if err := ix.IndexFact(f, a.Store.PathFor(f)); err != nil {
-			return 0, err
+	var n int
+	err = a.withIndex(func(ix *index.Index) error {
+		if err := ix.Reset(); err != nil {
+			return err
 		}
-		if err := ix.IndexLinks(f); err != nil {
-			return 0, err
+		for _, f := range facts {
+			if err := ix.IndexFact(f, a.Store.PathFor(f)); err != nil {
+				return err
+			}
+			if err := ix.IndexLinks(f); err != nil {
+				return err
+			}
 		}
-	}
-	return len(facts), nil
+		n = len(facts)
+		return nil
+	})
+	return n, err
 }
 
 // Save persists a fact and incrementally indexes it.
@@ -89,12 +107,9 @@ func (a *App) Save(in store.SaveInput) (fact.Fact, error) {
 	if err := a.ensureIndexDir(); err != nil {
 		return fact.Fact{}, err
 	}
-	ix, err := index.Open(a.Brain.IndexPath())
-	if err != nil {
-		return fact.Fact{}, err
-	}
-	defer ix.Close()
-	if err := ix.IndexFact(f, a.Store.PathFor(f)); err != nil {
+	if err := a.withIndex(func(ix *index.Index) error {
+		return ix.IndexFact(f, a.Store.PathFor(f))
+	}); err != nil {
 		return fact.Fact{}, err
 	}
 	return f, nil
@@ -111,20 +126,19 @@ func (a *App) Search(query string, limit int, project, typ string) (results []in
 	if err := a.ensureIndexDir(); err != nil {
 		return nil, false, err
 	}
-	ix, err := index.Open(a.Brain.IndexPath())
-	if err != nil {
-		return nil, false, err
-	}
-	defer ix.Close()
-	res, err := ix.Search(query, limit, project, typ)
-	if err != nil {
-		return nil, ix.Stale(), err
-	}
-	if len(res) == 0 {
-		res, err = ix.SearchAny(query, limit, project, typ)
-		return res, ix.Stale(), err
-	}
-	return res, ix.Stale(), nil
+	err = a.withIndex(func(ix *index.Index) error {
+		var searchErr error
+		results, searchErr = ix.Search(query, limit, project, typ)
+		stale = ix.Stale()
+		if searchErr != nil {
+			return searchErr
+		}
+		if len(results) == 0 {
+			results, searchErr = ix.SearchAny(query, limit, project, typ)
+		}
+		return searchErr
+	})
+	return results, stale, err
 }
 
 // Link adds (or updates) a reasoned wikilink from srcID to dstID on the source
@@ -137,12 +151,9 @@ func (a *App) Link(srcID, dstID, relation, why string) (fact.Fact, error) {
 	if err := a.ensureIndexDir(); err != nil {
 		return fact.Fact{}, err
 	}
-	ix, err := index.Open(a.Brain.IndexPath())
-	if err != nil {
-		return fact.Fact{}, err
-	}
-	defer ix.Close()
-	if err := ix.IndexLinks(f); err != nil {
+	if err := a.withIndex(func(ix *index.Index) error {
+		return ix.IndexLinks(f)
+	}); err != nil {
 		return fact.Fact{}, err
 	}
 	return f, nil
@@ -153,12 +164,13 @@ func (a *App) Why(aID, bID string) ([]index.Edge, error) {
 	if err := a.ensureIndexDir(); err != nil {
 		return nil, err
 	}
-	ix, err := index.Open(a.Brain.IndexPath())
-	if err != nil {
-		return nil, err
-	}
-	defer ix.Close()
-	return ix.Why(aID, bID)
+	var edges []index.Edge
+	err := a.withIndex(func(ix *index.Index) error {
+		var err error
+		edges, err = ix.Why(aID, bID)
+		return err
+	})
+	return edges, err
 }
 
 // Related returns every fact linked to or from id, with direction.
@@ -166,12 +178,13 @@ func (a *App) Related(id string) ([]index.Neighbor, error) {
 	if err := a.ensureIndexDir(); err != nil {
 		return nil, err
 	}
-	ix, err := index.Open(a.Brain.IndexPath())
-	if err != nil {
-		return nil, err
-	}
-	defer ix.Close()
-	return ix.Neighbors(id)
+	var neighbors []index.Neighbor
+	err := a.withIndex(func(ix *index.Index) error {
+		var err error
+		neighbors, err = ix.Neighbors(id)
+		return err
+	})
+	return neighbors, err
 }
 
 // Candidates surfaces facts lexically similar to the given fact but not yet linked
@@ -198,15 +211,14 @@ func (a *App) Candidates(id string, limit int) ([]index.Result, error) {
 	if err := a.ensureIndexDir(); err != nil {
 		return nil, err
 	}
-	ix, err := index.Open(a.Brain.IndexPath())
-	if err != nil {
-		return nil, err
-	}
-	defer ix.Close()
-	// Over-fetch so that, after dropping self + already-linked, we can still return
-	// up to limit results.
-	res, err := ix.SearchAny(terms, limit+len(linked), "", "") // ponytail: Candidates stays project/type-unscoped by design — mem_save's duplicate-hint and wiki_link's candidate discovery never asked for filtering, so no public param is exposed here; add one the moment a real caller needs it
-	if err != nil {
+	var res []index.Result
+	if err := a.withIndex(func(ix *index.Index) error {
+		// Over-fetch so that, after dropping self + already-linked, we can still return
+		// up to limit results.
+		var err error
+		res, err = ix.SearchAny(terms, limit+len(linked), "", "") // ponytail: Candidates stays project/type-unscoped by design — mem_save's duplicate-hint and wiki_link's candidate discovery never asked for filtering, so no public param is exposed here; add one the moment a real caller needs it
+		return err
+	}); err != nil {
 		return nil, err
 	}
 	out := make([]index.Result, 0, limit)
@@ -445,12 +457,9 @@ func (a *App) RemoveLink(srcID, dstID string) (fact.Fact, error) {
 	if err := a.ensureIndexDir(); err != nil {
 		return fact.Fact{}, err
 	}
-	ix, err := index.Open(a.Brain.IndexPath())
-	if err != nil {
-		return fact.Fact{}, err
-	}
-	defer ix.Close()
-	if err := ix.IndexLinks(f); err != nil {
+	if err := a.withIndex(func(ix *index.Index) error {
+		return ix.IndexLinks(f)
+	}); err != nil {
 		return fact.Fact{}, err
 	}
 	return f, nil
@@ -538,12 +547,9 @@ func (a *App) Archive(id string) (fact.Fact, error) {
 	if err := a.ensureIndexDir(); err != nil {
 		return fact.Fact{}, err
 	}
-	ix, err := index.Open(a.Brain.IndexPath())
-	if err != nil {
-		return fact.Fact{}, err
-	}
-	defer ix.Close()
-	if err := ix.DeleteFact(id); err != nil {
+	if err := a.withIndex(func(ix *index.Index) error {
+		return ix.DeleteFact(id)
+	}); err != nil {
 		return fact.Fact{}, err
 	}
 	return f, nil
@@ -559,16 +565,13 @@ func (a *App) Unarchive(id string) (fact.Fact, error) {
 	if err := a.ensureIndexDir(); err != nil {
 		return fact.Fact{}, err
 	}
-	ix, err := index.Open(a.Brain.IndexPath())
-	if err != nil {
-		return fact.Fact{}, err
-	}
-	defer ix.Close()
-	// PathFor points at the active tier — where the fact just returned to.
-	if err := ix.IndexFact(f, a.Store.PathFor(f)); err != nil {
-		return fact.Fact{}, err
-	}
-	if err := ix.IndexLinks(f); err != nil {
+	if err := a.withIndex(func(ix *index.Index) error {
+		// PathFor points at the active tier — where the fact just returned to.
+		if err := ix.IndexFact(f, a.Store.PathFor(f)); err != nil {
+			return err
+		}
+		return ix.IndexLinks(f)
+	}); err != nil {
 		return fact.Fact{}, err
 	}
 	return f, nil
@@ -716,12 +719,9 @@ func (a *App) Delete(id string) (bool, error) {
 	if err := a.ensureIndexDir(); err != nil {
 		return false, err
 	}
-	ix, err := index.Open(a.Brain.IndexPath())
-	if err != nil {
-		return false, err
-	}
-	defer ix.Close()
-	if err := ix.DeleteFact(id); err != nil {
+	if err := a.withIndex(func(ix *index.Index) error {
+		return ix.DeleteFact(id)
+	}); err != nil {
 		return false, err
 	}
 	return true, nil

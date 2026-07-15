@@ -8,10 +8,9 @@ package mcp
 //
 // Grounded at the exact interface Task 3 of the plan produces:
 //   func RunBackgroundReindex(ctx context.Context, a *app.App, factsDir string, interval time.Duration)
-// — the background mechanism a real `bbrain mcp` session runs. This is a
-// black-box observation of the mechanism's own cost contract (does it
-// actually rebuild the index file when nothing changed?), not a peek at an
-// internal call counter.
+// — the background mechanism a real `bbrain mcp` session runs, for the life of ONE process
+// (this test uses a single continuous invocation, matching that reality — not two separate
+// start/stop calls, which would test a server-restart scenario AC-3 never promised to solve).
 
 import (
 	"context"
@@ -25,18 +24,15 @@ import (
 	"github.com/JaraEsequiel/BBrain/internal/store"
 )
 
-// TestAcceptance_AC3_NoFullReindexCostWhenFactsDirUnchanged runs the
-// background mechanism against a brain with no changes across several ticks,
-// then makes one real change and runs it again — using the on-disk index
-// file's mtime as the observable proxy for "a full rebuild actually ran"
-// (RebuildAll/Reset rewrite the derived index file; a no-op tick must not
-// touch it at all):
+// TestAcceptance_AC3_NoFullReindexCostWhenFactsDirUnchanged starts the background mechanism
+// once (as a real bbrain mcp process would) against a brain with no changes for a while, then
+// makes one real change while the SAME loop instance keeps running — using the on-disk index
+// file's mtime as the observable proxy for "a full rebuild actually ran":
 //
-//   - TC-3.1 (positive): with nothing changed in facts dir since the last
-//     reindex, N consecutive ticks never touch (rewrite) the index file.
-//   - TC-3.2 (negative): a real, single-fact change does trigger a rebuild —
-//     proving the gate isn't just permanently stuck off; a genuine change is
-//     still picked up.
+//   - TC-3.1 (positive): with nothing changed in facts dir since the loop started, several
+//     ticks never touch (rewrite) the index file.
+//   - TC-3.2 (negative): a real, single-fact change made while the loop is still running does
+//     trigger a rebuild — proving the gate isn't just permanently stuck off.
 func TestAcceptance_AC3_NoFullReindexCostWhenFactsDirUnchanged(t *testing.T) {
 	dir := t.TempDir()
 	a := app.New(dir)
@@ -53,21 +49,21 @@ func TestAcceptance_AC3_NoFullReindexCostWhenFactsDirUnchanged(t *testing.T) {
 		t.Fatalf("stat index before: %v", err)
 	}
 
-	// TC-3.1: nothing changes in factsDir for several ticks.
-	runLoop := func(factsDir string, d time.Duration) {
-		ctx, cancel := context.WithCancel(context.Background())
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			RunBackgroundReindex(ctx, a, factsDir, 20*time.Millisecond)
-		}()
-		time.Sleep(d)
+	factsDir := a.Brain.FactsDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		RunBackgroundReindex(ctx, a, factsDir, 20*time.Millisecond)
+	}()
+	defer func() {
 		cancel()
 		wg.Wait()
-	}
-	runLoop(a.Brain.FactsDir(), 150*time.Millisecond)
+	}()
 
+	// TC-3.1: nothing changes for a while.
+	time.Sleep(150 * time.Millisecond)
 	afterNoChange, err := os.Stat(indexPath)
 	if err != nil {
 		t.Fatalf("stat index after no-op ticks: %v", err)
@@ -77,12 +73,12 @@ func TestAcceptance_AC3_NoFullReindexCostWhenFactsDirUnchanged(t *testing.T) {
 			before.ModTime(), before.Size(), afterNoChange.ModTime(), afterNoChange.Size())
 	}
 
-	// TC-3.2: a real change must still trigger a rebuild.
-	if err := os.WriteFile(filepath.Join(a.Brain.FactsDir(), "extra.md"),
+	// TC-3.2: a real change, made while the same loop is still running, must trigger a rebuild.
+	if err := os.WriteFile(filepath.Join(factsDir, "extra.md"),
 		[]byte("---\nkey: extra\ntype: note\nproject: p\n---\n\n# Extra\n\nextra body\n"), 0o644); err != nil {
 		t.Fatalf("write extra fact: %v", err)
 	}
-	runLoop(a.Brain.FactsDir(), 150*time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
 
 	afterChange, err := os.Stat(indexPath)
 	if err != nil {

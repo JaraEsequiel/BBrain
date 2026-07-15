@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -536,5 +537,30 @@ func TestMemSaveSurfacesRelatedCandidates(t *testing.T) {
 	outC := call(t, a, "mem_save", `{"type":"decision","title":"Frontend teal palette","body":"pick teal accents","project":"p"}`)
 	if strings.Contains(outC, `"related"`) {
 		t.Fatalf("C is dissimilar; should have no related:\n%s", outC)
+	}
+}
+
+func TestMemSearchIncludesSnippet(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	call(t, a, "mem_save", `{"type":"decision","title":"JWT thing","body":"stateless tokens for authentication","project":"p","scope":"project"}`)
+	sr := call(t, a, "mem_search", `{"query":"stateless"}`)
+	if !strings.Contains(sr, `"snippet"`) {
+		t.Fatalf("mem_search result missing snippet key: %s", sr)
+	}
+}
+
+func TestMemCandidatesIncludesSnippet(t *testing.T) {
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	id1 := mustID(t, call(t, a, "mem_save", `{"type":"decision","title":"Cache design","body":"discusses caching strategies for the index","project":"p","scope":"project"}`))
+	call(t, a, "mem_save", `{"type":"decision","title":"Cache follow-up","body":"more caching strategies notes","project":"p","scope":"project"}`)
+	cr := call(t, a, "mem_candidates", fmt.Sprintf(`{"id":%q}`, id1))
+	if !strings.Contains(cr, `"snippet"`) {
+		t.Fatalf("mem_candidates result missing snippet key: %s", cr)
 	}
 }

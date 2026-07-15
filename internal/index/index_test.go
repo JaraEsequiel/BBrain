@@ -580,3 +580,20 @@ func TestSearchNoMatchesReturnsEmptyNoError(t *testing.T) {
 		t.Fatalf("want 0 results, got %d", len(res))
 	}
 }
+
+func TestSearchAnyIncludesSnippet(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("f1", "Fact one",
+		"discusses caching strategies for the index", "decision", "bbrain"), "/x/f1.md"))
+
+	res, err := ix.SearchAny("caching strategies", 10, "", "")
+	if err != nil {
+		t.Fatalf("SearchAny: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("want 1 result, got %d", len(res))
+	}
+	if res[0].Snippet == "" {
+		t.Fatalf("Snippet is empty, want non-empty")
+	}
+}

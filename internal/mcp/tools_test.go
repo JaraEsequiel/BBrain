@@ -402,6 +402,29 @@ func TestMemArchiveEmptyIdsReturnsZeroCount(t *testing.T) {
 	}
 }
 
+func TestMemArchiveRejectsOversizedBatch(t *testing.T) {
+	// security review finding: an unbounded ids array does unbounded filesystem
+	// work; reject a batch over maxBatchIDs before looping.
+	a := app.New(t.TempDir())
+	if err := a.Init(); err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, maxBatchIDs+1)
+	for i := range ids {
+		ids[i] = "nonexistent"
+	}
+	raw, err := json.Marshal(map[string][]string{"ids": ids})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := toolByName(t, "mem_archive").Handler(context.Background(), a, raw); err == nil {
+		t.Fatal("mem_archive must reject a batch over maxBatchIDs")
+	}
+	if _, err := toolByName(t, "mem_unarchive").Handler(context.Background(), a, raw); err == nil {
+		t.Fatal("mem_unarchive must reject a batch over maxBatchIDs")
+	}
+}
+
 func TestMemArchiveSchemaIsIdListOnly(t *testing.T) {
 	// AC-6: schema is id-list-only, no filter/bulk fields
 	schema := string(toolByName(t, "mem_archive").InputSchema)

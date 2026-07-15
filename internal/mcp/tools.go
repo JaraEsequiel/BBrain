@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,12 +182,21 @@ func handleMemDelete(ctx context.Context, a *app.App, raw json.RawMessage) (any,
 	return map[string]any{"deleted": deleted}, nil
 }
 
+// maxBatchIDs bounds mem_archive/mem_unarchive's ids array: these tools are
+// for explicit, small, user-driven batches ("archive that"), not bulk ops —
+// a huge list is already outside the guardrail's intent, so reject it before
+// looping rather than doing unbounded filesystem work.
+const maxBatchIDs = 1000
+
 func handleMemArchive(ctx context.Context, a *app.App, raw json.RawMessage) (any, error) {
 	var in struct {
 		IDs []string `json:"ids"`
 	}
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return nil, err
+	}
+	if len(in.IDs) > maxBatchIDs {
+		return nil, fmt.Errorf("mem_archive: %d ids exceeds the %d-id batch limit", len(in.IDs), maxBatchIDs)
 	}
 	archived := make([]string, 0, len(in.IDs))
 	for _, id := range in.IDs {
@@ -204,6 +214,9 @@ func handleMemUnarchive(ctx context.Context, a *app.App, raw json.RawMessage) (a
 	}
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return nil, err
+	}
+	if len(in.IDs) > maxBatchIDs {
+		return nil, fmt.Errorf("mem_unarchive: %d ids exceeds the %d-id batch limit", len(in.IDs), maxBatchIDs)
 	}
 	unarchived := make([]string, 0, len(in.IDs))
 	for _, id := range in.IDs {

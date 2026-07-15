@@ -31,6 +31,13 @@ const indexSchemaVersion = 1
 // value.
 const snippetTokens = 28
 
+// collapseWhitespace normalizes the FTS5 snippet() builtin's output, which
+// preserves the source body's raw whitespace/newlines verbatim rather than
+// collapsing them.
+func collapseWhitespace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
 // schema: a single standalone FTS5 table. Searchable columns (title, body, tags,
 // topic_key) are tokenized; identifiers/filters (fact_id, path, type, scope,
 // project) are UNINDEXED so they are stored verbatim and usable in WHERE.
@@ -224,7 +231,7 @@ func (ix *Index) factPreview(id string) (title, snippet string, err error) {
 		}
 		return "", "", err
 	}
-	return title, strings.Join(strings.Fields(snippet), " "), nil
+	return title, collapseWhitespace(snippet), nil
 }
 
 // Why returns the reasoned edges directly connecting a and b, in either direction
@@ -288,7 +295,7 @@ func (ix *Index) Neighbors(id string) ([]Neighbor, error) {
 			return nil, err
 		}
 		n.Title = title.String
-		n.Snippet = strings.Join(strings.Fields(n.Snippet), " ")
+		n.Snippet = collapseWhitespace(n.Snippet)
 		out = append(out, n)
 	}
 	return out, rows.Err()
@@ -376,11 +383,7 @@ func (ix *Index) search(match string, limit int, project, typ string) ([]Result,
 		if err := rows.Scan(&r.FactID, &r.Title, &r.Type, &r.Project, &r.Path, &r.Snippet); err != nil {
 			return nil, err
 		}
-		// The FTS5 snippet() builtin preserves the source body's raw whitespace/newlines
-		// verbatim (confirmed by spike) — it does not collapse them like the ticket's
-		// AC-3 requires. Normalize here; word-boundary safety (AC-2) is untouched since
-		// this only folds runs of whitespace, never splits a word.
-		r.Snippet = strings.Join(strings.Fields(r.Snippet), " ")
+		r.Snippet = collapseWhitespace(r.Snippet)
 		out = append(out, r)
 	}
 	return out, rows.Err()

@@ -624,6 +624,48 @@ func TestNeighborsIncludesTitleAndSnippet(t *testing.T) {
 	}
 }
 
+// PR review finding: Neighbors()'s snippet() call reaches facts_fts via a
+// LEFT JOIN, not a MATCH-driven scan — the only officially documented FTS5
+// usage pattern for snippet(). Every prior test here used a single neighbor;
+// this proves each row of a multi-neighbor result gets its own correct,
+// non-stale title/snippet, not a copy of another row's or a cursor artifact.
+func TestNeighborsMultipleNeighborsEachGetOwnTitleAndSnippet(t *testing.T) {
+	ix := openMem(t)
+	must(t, ix.IndexFact(sampleFact("a", "Fact A", "x", "decision", "bbrain"), "/x/a.md"))
+	must(t, ix.IndexFact(sampleFact("b", "Fact B", "Body of fact B.",
+		"decision", "bbrain"), "/x/b.md"))
+	must(t, ix.IndexFact(sampleFact("c", "Fact C", "Body of fact C.",
+		"decision", "bbrain"), "/x/c.md"))
+	fa := sampleFact("a", "Fact A", "x", "decision", "bbrain")
+	fa.Links = []fact.Link{
+		{Target: "[[b]]", Relation: "depends-on", Why: "needs b"},
+		{Target: "[[c]]", Relation: "relates", Why: "also c"},
+		{Target: "[[d]]", Relation: "relates", Why: "dangling"}, // "d" never indexed
+	}
+	must(t, ix.IndexLinks(fa))
+
+	ns, err := ix.Neighbors("a")
+	if err != nil {
+		t.Fatalf("Neighbors: %v", err)
+	}
+	if len(ns) != 3 {
+		t.Fatalf("Neighbors(a) = %+v, want 3 neighbors", ns)
+	}
+	byID := make(map[string]Neighbor, len(ns))
+	for _, n := range ns {
+		byID[n.FactID] = n
+	}
+	if got := byID["b"]; got.Title != "Fact B" || got.Snippet != "Body of fact B." {
+		t.Fatalf("neighbor b = %+v, want title/snippet for Fact B", got)
+	}
+	if got := byID["c"]; got.Title != "Fact C" || got.Snippet != "Body of fact C." {
+		t.Fatalf("neighbor c = %+v, want title/snippet for Fact C", got)
+	}
+	if got := byID["d"]; got.Title != "" || got.Snippet != "" {
+		t.Fatalf("dangling neighbor d = %+v, want empty title/snippet", got)
+	}
+}
+
 func TestNeighborsDanglingLinkReturnsEmptyTitleSnippetNoError(t *testing.T) {
 	ix := openMem(t)
 	fa := sampleFact("a", "Fact A", "x", "decision", "bbrain")

@@ -81,16 +81,8 @@ func (a *App) Reindex() (int, error) {
 	}
 	var n int
 	err = a.withIndex(func(ix *index.Index) error {
-		if err := ix.Reset(); err != nil {
+		if err := ix.RebuildAll(facts, a.Store.PathFor); err != nil {
 			return err
-		}
-		for _, f := range facts {
-			if err := ix.IndexFact(f, a.Store.PathFor(f)); err != nil {
-				return err
-			}
-			if err := ix.IndexLinks(f); err != nil {
-				return err
-			}
 		}
 		n = len(facts)
 		return nil

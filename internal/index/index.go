@@ -118,6 +118,22 @@ func (ix *Index) Stale() bool {
 	return ix.stale
 }
 
+// indexFactTx is the transaction-scoped body of IndexFact: it removes any
+// existing row with the same fact_id then inserts the current content, both
+// against the given tx so callers can compose it into a larger rebuild.
+func (ix *Index) indexFactTx(tx *sql.Tx, f fact.Fact, path string) error {
+	if _, err := tx.Exec(`DELETE FROM facts_fts WHERE fact_id = ?`, f.ID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(
+		`INSERT INTO facts_fts (fact_id, path, title, body, tags, topic_key, type, scope, project, updated_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		f.ID, path, f.Title, f.Body, strings.Join(f.Tags, " "), f.TopicKey,
+		f.Type, f.Scope, f.Project, f.UpdatedAt, f.CreatedAt,
+	)
+	return err
+}
+
 // IndexFact upserts a fact: it removes any existing row with the same fact_id
 // then inserts the current content.
 func (ix *Index) IndexFact(f fact.Fact, path string) error {
@@ -125,16 +141,7 @@ func (ix *Index) IndexFact(f fact.Fact, path string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM facts_fts WHERE fact_id = ?`, f.ID); err != nil {
-		tx.Rollback()
-		return err
-	}
-	if _, err := tx.Exec(
-		`INSERT INTO facts_fts (fact_id, path, title, body, tags, topic_key, type, scope, project, updated_at, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		f.ID, path, f.Title, f.Body, strings.Join(f.Tags, " "), f.TopicKey,
-		f.Type, f.Scope, f.Project, f.UpdatedAt, f.CreatedAt,
-	); err != nil {
+	if err := ix.indexFactTx(tx, f, path); err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -167,8 +174,18 @@ func (ix *Index) IndexLinks(f fact.Fact) error {
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM links WHERE src_id = ?`, f.ID); err != nil {
+	if err := ix.indexLinksTx(tx, f); err != nil {
 		tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+// indexLinksTx is the transaction-scoped body of IndexLinks: it removes any
+// existing edges originating from f.ID then inserts one row per link, both
+// against the given tx so callers can compose it into a larger rebuild.
+func (ix *Index) indexLinksTx(tx *sql.Tx, f fact.Fact) error {
+	if _, err := tx.Exec(`DELETE FROM links WHERE src_id = ?`, f.ID); err != nil {
 		return err
 	}
 	for _, l := range f.Links {
@@ -180,11 +197,10 @@ func (ix *Index) IndexLinks(f fact.Fact) error {
 			`INSERT OR REPLACE INTO links (src_id, dst_id, relation, why) VALUES (?, ?, ?, ?)`,
 			f.ID, dst, l.Relation, l.Why,
 		); err != nil {
-			tx.Rollback()
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // Edge is one reasoned graph edge.
@@ -301,6 +317,23 @@ func (ix *Index) Neighbors(id string) ([]Neighbor, error) {
 	return out, rows.Err()
 }
 
+// resetTx is the transaction-scoped body of Reset: it drops and recreates the
+// derived tables so a schema change in `schema` takes effect, against the
+// given tx so callers can compose it into a larger rebuild.
+func (ix *Index) resetTx(tx *sql.Tx) error {
+	for _, stmt := range []string{
+		`DROP TABLE IF EXISTS facts_fts`,
+		`DROP TABLE IF EXISTS links`,
+		schema, linksSchema,
+		fmt.Sprintf(`PRAGMA user_version = %d`, indexSchemaVersion),
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Reset drops and recreates the derived tables so a schema change in `schema`
 // takes effect. Unlike a row-wipe, this migrates the table definition; callers
 // repopulate via IndexFact. The index is derived from the .md files, so dropping
@@ -310,13 +343,36 @@ func (ix *Index) Reset() error {
 	if err != nil {
 		return err
 	}
-	for _, stmt := range []string{
-		`DROP TABLE IF EXISTS facts_fts`,
-		`DROP TABLE IF EXISTS links`,
-		schema, linksSchema,
-		fmt.Sprintf(`PRAGMA user_version = %d`, indexSchemaVersion),
-	} {
-		if _, err := tx.Exec(stmt); err != nil {
+	if err := ix.resetTx(tx); err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	ix.stale = false
+	return nil
+}
+
+// RebuildAll drops and repopulates the entire index from facts in a single
+// transaction: a failure at any point rolls back the whole rebuild, leaving
+// the prior index untouched. This is the only rebuild entry point App.Reindex
+// uses.
+func (ix *Index) RebuildAll(facts []fact.Fact, pathFor func(fact.Fact) string) error {
+	tx, err := ix.db.Begin()
+	if err != nil {
+		return err
+	}
+	if err := ix.resetTx(tx); err != nil {
+		tx.Rollback()
+		return err
+	}
+	for _, f := range facts {
+		if err := ix.indexFactTx(tx, f, pathFor(f)); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if err := ix.indexLinksTx(tx, f); err != nil {
 			tx.Rollback()
 			return err
 		}

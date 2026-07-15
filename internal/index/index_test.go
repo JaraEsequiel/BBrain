@@ -2,6 +2,7 @@ package index
 
 import (
 	"database/sql"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -749,5 +750,65 @@ func TestWhyNoDirectLinkReturnsEmptyNoError(t *testing.T) {
 	}
 	if len(edges) != 0 {
 		t.Fatalf("Why(a,b) with no link = %+v, want empty", edges)
+	}
+}
+
+// AC-2/D3: RebuildAll rebuilds the whole index in a single transaction — a
+// failure partway through must roll back the entire rebuild, leaving the
+// prior on-disk index untouched.
+func TestRebuildAllRollsBackOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "index.db")
+	ix, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	before := fact.Fact{ID: "f1", Title: "before", Body: "before body", Type: "note"}
+	if err := ix.IndexFact(before, "f1.md"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if err := ix.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	after := fact.Fact{ID: "f2", Title: "after", Body: "after body", Type: "note"}
+	if err := ix.RebuildAll([]fact.Fact{after}, func(f fact.Fact) string { return f.ID + ".md" }); err == nil {
+		t.Fatal("expected RebuildAll to fail on a closed index handle")
+	}
+
+	reopened, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer reopened.Close()
+	res, err := reopened.SearchAny("before", 10, "", "")
+	if err != nil {
+		t.Fatalf("search after failed rebuild: %v", err)
+	}
+	if len(res) == 0 {
+		t.Fatal("AC-2/D3: prior index state was lost after a failed RebuildAll — rollback did not hold")
+	}
+}
+
+func TestRebuildAllHappyPath(t *testing.T) {
+	dir := t.TempDir()
+	ix, err := Open(filepath.Join(dir, "index.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer ix.Close()
+
+	facts := []fact.Fact{
+		{ID: "f1", Title: "alpha", Body: "alpha body", Type: "note"},
+		{ID: "f2", Title: "beta", Body: "beta body", Type: "note"},
+	}
+	if err := ix.RebuildAll(facts, func(f fact.Fact) string { return f.ID + ".md" }); err != nil {
+		t.Fatalf("RebuildAll: %v", err)
+	}
+	for _, want := range []string{"alpha", "beta"} {
+		res, err := ix.SearchAny(want, 10, "", "")
+		if err != nil || len(res) == 0 {
+			t.Errorf("expected %q searchable after RebuildAll, res=%v err=%v", want, res, err)
+		}
 	}
 }

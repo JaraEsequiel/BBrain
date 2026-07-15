@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/JaraEsequiel/BBrain/internal/app"
@@ -700,8 +701,17 @@ func cmdMCP(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	var reindexWG sync.WaitGroup
+	reindexWG.Add(1)
+	go func() {
+		defer reindexWG.Done()
+		mcp.RunBackgroundReindex(ctx, a, a.Brain.FactsDir(), 2*time.Second)
+	}()
+	// Deferred in this order so, at return, cancel() runs first (LIFO) to signal
+	// the goroutine to stop, then Wait() blocks until it actually has — reversing
+	// this order would deadlock (Wait() would run before anything ever cancels).
+	defer reindexWG.Wait()
 	defer cancel()
-	go mcp.RunBackgroundReindex(ctx, a, a.Brain.FactsDir(), 2*time.Second)
 
 	srv := &mcp.Server{App: a, Tools: mcp.DefaultTools()}
 	if err := srv.Serve(ctx, stdin, stdout); err != nil {
